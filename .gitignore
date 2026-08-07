@@ -1,0 +1,68 @@
+# Unreal Engine generated directories (also applies inside Plugins)
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Locally generated build and staging metadata
+/Build/
+
+# Unreal-generated IDE/project files
+*.sln
+*.slnx
+*.xcodeproj
+*.xcworkspace
+*.code-workspace
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.user
+*.userprefs
+*.csproj
+*.csproj.user
+*.tmp
+*.temp
+*.log
+.vsconfig
+
+# JetBrains Rider / IntelliJ
+.idea/
+*.DotSettings.user
+*.sln.DotSettings.user
+
+# Visual Studio / VS Code / Fleet
+.vs/
+.vscode/
+.fleet/
+
+# Unreal Automation Tool and local packaging output
+Engine/Programs/AutomationTool/Saved/
+LocalBuilds/
+StagedBuilds/
+PackagedBuilds/
+
+# C++ compiler and analysis caches
+.clangd/
+.cache/
+ipch/
+enc_temp_folder/
+
+# Python helper caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor backups
+*~
+*.bak
+*.orig
+*.swp
