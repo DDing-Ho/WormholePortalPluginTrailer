@@ -12,6 +12,16 @@
 				"Engine",
 				"WormholePortalRuntime"
 			]
+		},
+		{
+			"Name": "TP_FirstPerson",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"AIModule",
+				"UMG"
+			]
 		}
 	],
 	"Plugins": [
@@ -84,6 +94,14 @@
 		},
 		{
 			"Name": "GameplayInteractions",
+			"Enabled": true
+		},
+		{
+			"Name": "StateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayStateTree",
 			"Enabled": true
 		},
 		{

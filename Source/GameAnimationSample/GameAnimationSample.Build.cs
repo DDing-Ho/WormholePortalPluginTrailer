@@ -11,6 +11,7 @@ public class GameAnimationSample : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"TP_FirstPerson",
 			"WormholePortalRuntime"
 		});
 	}
