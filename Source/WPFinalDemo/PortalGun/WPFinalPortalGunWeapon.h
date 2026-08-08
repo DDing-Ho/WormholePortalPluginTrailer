@@ -24,6 +24,7 @@ public:
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void StartAlternateFiring() override;
+	virtual void HandleUtilityAxisInput(float AxisValue) override;
 
 protected:
 	virtual void BeginPlay() override;

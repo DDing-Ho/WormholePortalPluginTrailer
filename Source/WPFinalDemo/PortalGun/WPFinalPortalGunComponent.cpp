@@ -67,7 +67,20 @@ void UWPFinalPortalGunComponent::CyclePortalSpawnDirection(const float WheelDelt
 	const int32 DirectionCount = static_cast<int32>(EWPFinalPortalSpawnDirection::Count);
 	const int32 CurrentDirection = FMath::Clamp(static_cast<int32>(PortalSpawnDirection), 0, DirectionCount - 1);
 	const int32 DirectionStep = WheelDelta > 0.0f ? 1 : -1;
-	PortalSpawnDirection = static_cast<EWPFinalPortalSpawnDirection>((CurrentDirection + DirectionStep + DirectionCount) % DirectionCount);
+	SetPortalSpawnDirection(static_cast<EWPFinalPortalSpawnDirection>((CurrentDirection + DirectionStep + DirectionCount) % DirectionCount));
+}
+
+void UWPFinalPortalGunComponent::SetPortalSpawnDirection(const EWPFinalPortalSpawnDirection NewDirection)
+{
+	const int32 NewDirectionIndex = static_cast<int32>(NewDirection);
+	const int32 DirectionCount = static_cast<int32>(EWPFinalPortalSpawnDirection::Count);
+	if (NewDirectionIndex >= DirectionCount || NewDirection == PortalSpawnDirection)
+	{
+		return;
+	}
+
+	PortalSpawnDirection = NewDirection;
+	OnPortalSpawnDirectionChanged.Broadcast(PortalSpawnDirection);
 }
 
 bool UWPFinalPortalGunComponent::PlacePortal(const FHitResult& HitResult, TObjectPtr<AWormholePortalActor>& PortalSlot, float& GrowthElapsed, bool& bIsGrowing)

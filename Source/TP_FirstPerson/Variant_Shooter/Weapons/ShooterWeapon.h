@@ -168,6 +168,9 @@ public:
 	/** Stop this weapon's alternate fire mode. Weapons without one leave this as a no-op. */
 	virtual void StopAlternateFiring();
 
+	/** Handle an optional one-dimensional utility input, such as a mouse wheel. */
+	virtual void HandleUtilityAxisInput(float AxisValue);
+
 protected:
 
 	/** Fire the weapon */

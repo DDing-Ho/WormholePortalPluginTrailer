@@ -28,6 +28,7 @@ public class TP_FirstPerson : ModuleRules
 			"TP_FirstPerson/Variant_Horror",
 			"TP_FirstPerson/Variant_Horror/UI",
 			"TP_FirstPerson/Variant_Shooter",
+			"TP_FirstPerson/Variant_Shooter/Components",
 			"TP_FirstPerson/Variant_Shooter/AI",
 			"TP_FirstPerson/Variant_Shooter/UI",
 			"TP_FirstPerson/Variant_Shooter/Weapons"

@@ -151,6 +151,14 @@ void AWPFinalPortalGunWeapon::StartAlternateFiring()
 	ShootPortal(WeaponOwner->GetWeaponTargetLocation(), false);
 }
 
+void AWPFinalPortalGunWeapon::HandleUtilityAxisInput(const float AxisValue)
+{
+	if (PortalGunComponent)
+	{
+		PortalGunComponent->CyclePortalSpawnDirection(AxisValue);
+	}
+}
+
 bool AWPFinalPortalGunWeapon::ShootPortal(const FVector& TargetLocation, const bool bBluePortal)
 {
 	UWorld* const World = GetWorld();

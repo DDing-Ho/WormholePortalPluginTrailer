@@ -144,6 +144,11 @@ void AShooterWeapon::StopAlternateFiring()
 	// Optional weapon feature.
 }
 
+void AShooterWeapon::HandleUtilityAxisInput(const float AxisValue)
+{
+	// Optional weapon feature.
+}
+
 void AShooterWeapon::Fire()
 {
 	// ensure the player still wants to fire. They may have let go of the trigger

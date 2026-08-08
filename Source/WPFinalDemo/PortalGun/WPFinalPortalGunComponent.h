@@ -20,6 +20,11 @@ enum class EWPFinalPortalSpawnDirection : uint8
 	Count UMETA(Hidden)
 };
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FWPFinalPortalSpawnDirectionChangedDelegate,
+	EWPFinalPortalSpawnDirection,
+	Direction);
+
 UENUM(BlueprintType)
 enum class EWPFinalPortalGrowthMode : uint8
 {
@@ -57,6 +62,16 @@ class WPFINALDEMO_API UWPFinalPortalGunComponent : public UActorComponent
 	UFUNCTION(BlueprintCallable, Category = "Wormhole Portal|Portal Gun|Spawn")
 	void CyclePortalSpawnDirection(float WheelDelta);
 
+	UFUNCTION(BlueprintCallable, Category = "Wormhole Portal|Portal Gun|Spawn")
+	void SetPortalSpawnDirection(EWPFinalPortalSpawnDirection NewDirection);
+
+	UFUNCTION(BlueprintPure, Category = "Wormhole Portal|Portal Gun|Spawn")
+	EWPFinalPortalSpawnDirection GetPortalSpawnDirection() const { return PortalSpawnDirection; }
+
+	/** Broadcast after the selected world-space forward axis changes. */
+	UPROPERTY(BlueprintAssignable, Category = "Wormhole Portal|Portal Gun|Spawn")
+	FWPFinalPortalSpawnDirectionChangedDelegate OnPortalSpawnDirectionChanged;
+
   private:
 	bool PlacePortal(const FHitResult& HitResult, TObjectPtr<AWormholePortalActor>& PortalSlot, float& GrowthElapsed, bool& bIsGrowing);
 	void LinkPortals();
@@ -74,7 +89,7 @@ class WPFINALDEMO_API UWPFinalPortalGunComponent : public UActorComponent
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wormhole Portal|Portal Gun|Spawn", meta = (AllowPrivateAccess = "true"))
 	bool bCanSpawnPortalB = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wormhole Portal|Portal Gun|Spawn", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wormhole Portal|Portal Gun|Spawn", meta = (AllowPrivateAccess = "true"))
 	EWPFinalPortalSpawnDirection PortalSpawnDirection = EWPFinalPortalSpawnDirection::PositiveX;
 
 	UPROPERTY(

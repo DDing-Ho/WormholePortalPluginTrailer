@@ -3,7 +3,9 @@
 
 #include "ShooterCharacter.h"
 #include "ShooterWeapon.h"
+#include "Components/FirstPersonPhysicsGrabComponent.h"
 #include "EnhancedInputComponent.h"
+#include "InputActionValue.h"
 #include "Components/InputComponent.h"
 #include "Components/PawnNoiseEmitterComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -20,12 +22,27 @@ AShooterCharacter::AShooterCharacter()
 {
 	// create the noise emitter component
 	PawnNoiseEmitter = CreateDefaultSubobject<UPawnNoiseEmitterComponent>(TEXT("Pawn Noise Emitter"));
+	PhysicsGrabComponent = CreateDefaultSubobject<UFirstPersonPhysicsGrabComponent>(TEXT("Physics Grab Component"));
 
 	static ConstructorHelpers::FObjectFinder<UInputAction> AlternateFireActionAsset(
 		TEXT("/Game/WormholePortal/Demo/Input/Actions/IA_FirePortalB.IA_FirePortalB"));
 	if (AlternateFireActionAsset.Succeeded())
 	{
 		AlternateFireAction = AlternateFireActionAsset.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> GrabActionAsset(
+		TEXT("/Game/Variant_Shooter/Input/Actions/IA_Grab.IA_Grab"));
+	if (GrabActionAsset.Succeeded())
+	{
+		GrabAction = GrabActionAsset.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> CyclePortalDirectionActionAsset(
+		TEXT("/Game/WormholePortal/Demo/Input/Actions/IA_CyclePortalDirection.IA_CyclePortalDirection"));
+	if (CyclePortalDirectionActionAsset.Succeeded())
+	{
+		CyclePortalDirectionAction = CyclePortalDirectionActionAsset.Object;
 	}
 
 	// configure movement
@@ -71,6 +88,17 @@ void AShooterCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 
 		// Switch weapon
 		EnhancedInputComponent->BindAction(SwitchWeaponAction, ETriggerEvent::Triggered, this, &AShooterCharacter::DoSwitchWeapon);
+
+		if (GrabAction)
+		{
+			EnhancedInputComponent->BindAction(GrabAction, ETriggerEvent::Started, this, &AShooterCharacter::DoToggleGrab);
+		}
+
+		if (CyclePortalDirectionAction)
+		{
+			EnhancedInputComponent->BindAction(
+				CyclePortalDirectionAction, ETriggerEvent::Triggered, this, &AShooterCharacter::DoCyclePortalDirection);
+		}
 	}
 
 }
@@ -195,6 +223,22 @@ void AShooterCharacter::DoSwitchWeapon()
 
 		// activate the new weapon
 		CurrentWeapon->ActivateWeapon(PlayerTag);
+	}
+}
+
+void AShooterCharacter::DoToggleGrab()
+{
+	if (PhysicsGrabComponent && !IsDead())
+	{
+		PhysicsGrabComponent->ToggleGrab();
+	}
+}
+
+void AShooterCharacter::DoCyclePortalDirection(const FInputActionValue& Value)
+{
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->HandleUtilityAxisInput(Value.Get<float>());
 	}
 }
 
@@ -323,6 +367,11 @@ AShooterWeapon* AShooterCharacter::FindWeaponOfType(TSubclassOf<AShooterWeapon> 
 
 void AShooterCharacter::Die()
 {
+	if (PhysicsGrabComponent)
+	{
+		PhysicsGrabComponent->DropActor();
+	}
+
 	// deactivate the weapon
 	if (IsValid(CurrentWeapon))
 	{

@@ -10,7 +10,9 @@
 class AShooterWeapon;
 class UInputAction;
 class UInputComponent;
+class UFirstPersonPhysicsGrabComponent;
 class UPawnNoiseEmitterComponent;
+struct FInputActionValue;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FBulletCountUpdatedDelegate, int32, MagazineSize, int32, Bullets);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FDamagedDelegate, float, LifePercent);
@@ -29,6 +31,10 @@ class TP_FIRSTPERSON_API AShooterCharacter : public ATP_FirstPersonCharacter, pu
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UPawnNoiseEmitterComponent* PawnNoiseEmitter;
 
+	/** Physics handle used to grab and constrain objects in front of the player. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UFirstPersonPhysicsGrabComponent> PhysicsGrabComponent;
+
 protected:
 
 	/** Fire weapon input action */
@@ -42,6 +48,14 @@ protected:
 	/** Switch weapon input action */
 	UPROPERTY(EditAnywhere, Category ="Input")
 	UInputAction* SwitchWeaponAction;
+
+	/** Toggles the physics grab constraint. Assign an Input Action in Blueprint. */
+	UPROPERTY(EditAnywhere, Category ="Input")
+	TObjectPtr<UInputAction> GrabAction;
+
+	/** Cycles the equipped portal gun's world-space forward direction. */
+	UPROPERTY(EditAnywhere, Category ="Input")
+	TObjectPtr<UInputAction> CyclePortalDirectionAction;
 
 	/** Name of the first person mesh weapon socket */
 	UPROPERTY(EditAnywhere, Category ="Weapons")
@@ -147,6 +161,17 @@ public:
 	/** Handles switch weapon input */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	void DoSwitchWeapon();
+
+	/** Returns the weapon currently equipped by this character. */
+	UFUNCTION(BlueprintPure, Category="Weapons")
+	AShooterWeapon* GetCurrentWeapon() const { return CurrentWeapon; }
+
+	/** Grabs the viewed physics body, or drops the currently held body. */
+	UFUNCTION(BlueprintCallable, Category="Input")
+	void DoToggleGrab();
+
+	/** Routes the wheel axis to the equipped weapon's portal direction handler. */
+	void DoCyclePortalDirection(const FInputActionValue& Value);
 
 public:
 

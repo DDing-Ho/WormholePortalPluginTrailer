@@ -4,6 +4,9 @@ DerivedDataCache/
 Intermediate/
 Saved/
 
+# Unreal Asset Ignore
+/Content/Polar/
+
 # Locally generated build and staging metadata
 /Build/
 
