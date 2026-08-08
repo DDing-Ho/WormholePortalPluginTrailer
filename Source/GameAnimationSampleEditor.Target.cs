@@ -7,6 +7,6 @@ public class GameAnimationSampleEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
-		ExtraModuleNames.Add("GameAnimationSample");
+		ExtraModuleNames.AddRange(new[] { "GameAnimationSample", "TP_FirstPerson", "WPFinalDemo" });
 	}
 }

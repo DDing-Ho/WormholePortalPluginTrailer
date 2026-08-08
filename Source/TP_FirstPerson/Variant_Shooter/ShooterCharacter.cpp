@@ -1,0 +1,425 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+
+#include "ShooterCharacter.h"
+#include "ShooterWeapon.h"
+#include "Components/FirstPersonPhysicsGrabComponent.h"
+#include "EnhancedInputComponent.h"
+#include "InputActionValue.h"
+#include "Components/InputComponent.h"
+#include "Components/PawnNoiseEmitterComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Engine/World.h"
+#include "Camera/CameraComponent.h"
+#include "TimerManager.h"
+#include "ShooterGameMode.h"
+#include "InputAction.h"
+#include "UObject/ConstructorHelpers.h"
+
+AShooterCharacter::AShooterCharacter()
+{
+	// create the noise emitter component
+	PawnNoiseEmitter = CreateDefaultSubobject<UPawnNoiseEmitterComponent>(TEXT("Pawn Noise Emitter"));
+	PhysicsGrabComponent = CreateDefaultSubobject<UFirstPersonPhysicsGrabComponent>(TEXT("Physics Grab Component"));
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> AlternateFireActionAsset(
+		TEXT("/Game/WormholePortal/Demo/Input/Actions/IA_FirePortalB.IA_FirePortalB"));
+	if (AlternateFireActionAsset.Succeeded())
+	{
+		AlternateFireAction = AlternateFireActionAsset.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> GrabActionAsset(
+		TEXT("/Game/Variant_Shooter/Input/Actions/IA_Grab.IA_Grab"));
+	if (GrabActionAsset.Succeeded())
+	{
+		GrabAction = GrabActionAsset.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> CyclePortalDirectionActionAsset(
+		TEXT("/Game/WormholePortal/Demo/Input/Actions/IA_CyclePortalDirection.IA_CyclePortalDirection"));
+	if (CyclePortalDirectionActionAsset.Succeeded())
+	{
+		CyclePortalDirectionAction = CyclePortalDirectionActionAsset.Object;
+	}
+
+	// configure movement
+	GetCharacterMovement()->RotationRate = FRotator(0.0f, 600.0f, 0.0f);
+}
+
+void AShooterCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// reset HP to max
+	CurrentHP = MaxHP;
+
+	// update the HUD
+	OnDamaged.Broadcast(1.0f);
+}
+
+void AShooterCharacter::EndPlay(EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	// clear the respawn timer
+	GetWorld()->GetTimerManager().ClearTimer(RespawnTimer);
+}
+
+void AShooterCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+	// base class handles move, aim and jump inputs
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+	// Set up action bindings
+	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+	{
+		// Firing
+		EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &AShooterCharacter::DoStartFiring);
+		EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Completed, this, &AShooterCharacter::DoStopFiring);
+
+		if (AlternateFireAction)
+		{
+			EnhancedInputComponent->BindAction(AlternateFireAction, ETriggerEvent::Started, this, &AShooterCharacter::DoStartAlternateFiring);
+			EnhancedInputComponent->BindAction(AlternateFireAction, ETriggerEvent::Completed, this, &AShooterCharacter::DoStopAlternateFiring);
+		}
+
+		// Switch weapon
+		EnhancedInputComponent->BindAction(SwitchWeaponAction, ETriggerEvent::Triggered, this, &AShooterCharacter::DoSwitchWeapon);
+
+		if (GrabAction)
+		{
+			EnhancedInputComponent->BindAction(GrabAction, ETriggerEvent::Started, this, &AShooterCharacter::DoToggleGrab);
+		}
+
+		if (CyclePortalDirectionAction)
+		{
+			EnhancedInputComponent->BindAction(
+				CyclePortalDirectionAction, ETriggerEvent::Triggered, this, &AShooterCharacter::DoCyclePortalDirection);
+		}
+	}
+
+}
+
+float AShooterCharacter::TakeDamage(float Damage, struct FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	// ignore if already dead
+	if (CurrentHP <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	// Reduce HP
+	CurrentHP -= Damage;
+
+	// Have we depleted HP?
+	if (CurrentHP <= 0.0f)
+	{
+		Die();
+	}
+
+	// update the HUD
+	OnDamaged.Broadcast(FMath::Max(0.0f, CurrentHP / MaxHP));
+
+	return Damage;
+}
+
+void AShooterCharacter::DoAim(float Yaw, float Pitch)
+{
+	// only route inputs if the character is not dead
+	if (!IsDead())
+	{
+		Super::DoAim(Yaw, Pitch);
+	}
+}
+
+void AShooterCharacter::DoMove(float Right, float Forward)
+{
+	// only route inputs if the character is not dead
+	if (!IsDead())
+	{
+		Super::DoMove(Right, Forward);
+	}
+}
+
+void AShooterCharacter::DoJumpStart()
+{
+	// only route inputs if the character is not dead
+	if (!IsDead())
+	{
+		Super::DoJumpStart();
+	}
+}
+
+void AShooterCharacter::DoJumpEnd()
+{
+	// only route inputs if the character is not dead
+	if (!IsDead())
+	{
+		Super::DoJumpEnd();
+	}
+}
+
+void AShooterCharacter::DoStartFiring()
+{
+	// fire the current weapon
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->StartFiring();
+	}
+}
+
+void AShooterCharacter::DoStopFiring()
+{
+	// stop firing the current weapon
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->StopFiring();
+	}
+}
+
+void AShooterCharacter::DoStartAlternateFiring()
+{
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->StartAlternateFiring();
+	}
+}
+
+void AShooterCharacter::DoStopAlternateFiring()
+{
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->StopAlternateFiring();
+	}
+}
+
+void AShooterCharacter::DoSwitchWeapon()
+{
+	// ensure we have at least two weapons two switch between
+	if (OwnedWeapons.Num() > 1 && !IsDead())
+	{
+		// deactivate the old weapon
+		CurrentWeapon->DeactivateWeapon();
+
+		// find the index of the current weapon in the owned list
+		int32 WeaponIndex = OwnedWeapons.Find(CurrentWeapon);
+
+		// is this the last weapon?
+		if (WeaponIndex == OwnedWeapons.Num() - 1)
+		{
+			// loop back to the beginning of the array
+			WeaponIndex = 0;
+		}
+		else {
+			// select the next weapon index
+			++WeaponIndex;
+		}
+
+		// set the new weapon as current
+		CurrentWeapon = OwnedWeapons[WeaponIndex];
+
+		// activate the new weapon
+		CurrentWeapon->ActivateWeapon(PlayerTag);
+	}
+}
+
+void AShooterCharacter::DoToggleGrab()
+{
+	if (PhysicsGrabComponent && !IsDead())
+	{
+		PhysicsGrabComponent->ToggleGrab();
+	}
+}
+
+void AShooterCharacter::DoCyclePortalDirection(const FInputActionValue& Value)
+{
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->HandleUtilityAxisInput(Value.Get<float>());
+	}
+}
+
+void AShooterCharacter::AttachWeaponMeshes(AShooterWeapon* Weapon)
+{
+	const FAttachmentTransformRules ActorAttachmentRule(EAttachmentRule::SnapToTarget, false);
+	const FAttachmentTransformRules MeshAttachmentRule(
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::KeepRelative,
+		false);
+
+	// attach the weapon actor
+	Weapon->AttachToActor(this, ActorAttachmentRule);
+
+	// Snap location and rotation while preserving each weapon mesh's authored scale.
+	Weapon->GetFirstPersonMesh()->AttachToComponent(GetFirstPersonMesh(), MeshAttachmentRule, FirstPersonWeaponSocket);
+	Weapon->GetThirdPersonMesh()->AttachToComponent(GetMesh(), MeshAttachmentRule, ThirdPersonWeaponSocket);
+	
+}
+
+void AShooterCharacter::PlayFiringMontage(UAnimMontage* Montage)
+{
+	// stub
+}
+
+void AShooterCharacter::AddWeaponRecoil(float Recoil)
+{
+	// apply the recoil as pitch input
+	AddControllerPitchInput(Recoil);
+}
+
+void AShooterCharacter::UpdateWeaponHUD(int32 CurrentAmmo, int32 MagazineSize)
+{
+	OnBulletCountUpdated.Broadcast(MagazineSize, CurrentAmmo);
+}
+
+FVector AShooterCharacter::GetWeaponTargetLocation()
+{
+	// trace ahead from the camera viewpoint
+	FHitResult OutHit;
+
+	const FVector Start = GetFirstPersonCameraComponent()->GetComponentLocation();
+	const FVector End = Start + (GetFirstPersonCameraComponent()->GetForwardVector() * MaxAimDistance);
+
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	GetWorld()->LineTraceSingleByChannel(OutHit, Start, End, ECC_Visibility, QueryParams);
+
+	// return either the impact point or the trace end
+	return OutHit.bBlockingHit ? OutHit.ImpactPoint : OutHit.TraceEnd;
+}
+
+void AShooterCharacter::AddWeaponClass(const TSubclassOf<AShooterWeapon>& WeaponClass)
+{
+	// do we already own this weapon?
+	AShooterWeapon* OwnedWeapon = FindWeaponOfType(WeaponClass);
+
+	if (!OwnedWeapon)
+	{
+		// spawn the new weapon
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.Instigator = this;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		SpawnParams.TransformScaleMethod = ESpawnActorScaleMethod::MultiplyWithRoot;
+
+		AShooterWeapon* AddedWeapon = GetWorld()->SpawnActor<AShooterWeapon>(WeaponClass, GetActorTransform(), SpawnParams);
+
+		if (AddedWeapon)
+		{
+			// add the weapon to the owned list
+			OwnedWeapons.Add(AddedWeapon);
+
+			// if we have an existing weapon, deactivate it
+			if (CurrentWeapon)
+			{
+				CurrentWeapon->DeactivateWeapon();
+			}
+
+			// switch to the new weapon
+			CurrentWeapon = AddedWeapon;
+			CurrentWeapon->ActivateWeapon(PlayerTag);
+		}
+	}
+}
+
+void AShooterCharacter::OnWeaponActivated(AShooterWeapon* Weapon)
+{
+	// update the bullet counter
+	OnBulletCountUpdated.Broadcast(Weapon->GetMagazineSize(), Weapon->GetBulletCount());
+
+	// set the character mesh AnimInstances
+	GetFirstPersonMesh()->SetAnimInstanceClass(Weapon->GetFirstPersonAnimInstanceClass());
+	GetMesh()->SetAnimInstanceClass(Weapon->GetThirdPersonAnimInstanceClass());
+
+	GetFirstPersonMesh()->SetHiddenInGame(Weapon->ShouldHideFirstPersonCharacterMesh(), false);
+}
+
+void AShooterCharacter::OnWeaponDeactivated(AShooterWeapon* Weapon)
+{
+	GetFirstPersonMesh()->SetHiddenInGame(false, false);
+}
+
+void AShooterCharacter::OnSemiWeaponRefire()
+{
+	// unused
+}
+
+AShooterWeapon* AShooterCharacter::FindWeaponOfType(TSubclassOf<AShooterWeapon> WeaponClass) const
+{
+	// check each owned weapon
+	for (AShooterWeapon* Weapon : OwnedWeapons)
+	{
+		if (Weapon->IsA(WeaponClass))
+		{
+			return Weapon;
+		}
+	}
+
+	// weapon not found
+	return nullptr;
+
+}
+
+void AShooterCharacter::Die()
+{
+	if (PhysicsGrabComponent)
+	{
+		PhysicsGrabComponent->DropActor();
+	}
+
+	// deactivate the weapon
+	if (IsValid(CurrentWeapon))
+	{
+		CurrentWeapon->DeactivateWeapon();
+	}
+
+	// increment the team score
+	if (AShooterGameMode* GM = Cast<AShooterGameMode>(GetWorld()->GetAuthGameMode()))
+	{
+		GM->IncrementTeamScore(TeamByte);
+	}
+
+	// grant the death tag to the character
+	Tags.Add(DeathTag);
+		
+	// stop character movement
+	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->DisableMovement();
+
+	// disable collision
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	// disable controls
+	DisableInput(nullptr);
+
+	// reset the bullet counter UI
+	OnBulletCountUpdated.Broadcast(0, 0);
+
+	// call the BP handler
+	BP_OnDeath();
+
+	// schedule character respawn
+	GetWorld()->GetTimerManager().SetTimer(RespawnTimer, this, &AShooterCharacter::OnRespawn, RespawnTime, false);
+}
+
+void AShooterCharacter::OnRespawn()
+{
+	// destroy the character to force the PC to respawn
+	Destroy();
+}
+
+bool AShooterCharacter::IsDead() const
+{
+	// the character is dead if their current HP drops to zero
+	return CurrentHP <= 0.0f;
+}
+
+void AShooterCharacter::SetTeam(uint8 Team)
+{
+	TeamByte = Team;
+}

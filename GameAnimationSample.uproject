@@ -12,6 +12,26 @@
 				"Engine",
 				"WormholePortalRuntime"
 			]
+		},
+		{
+			"Name": "TP_FirstPerson",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"AIModule",
+				"UMG"
+			]
+		},
+		{
+			"Name": "WPFinalDemo",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"TP_FirstPerson",
+				"WormholePortalRuntime"
+			]
 		}
 	],
 	"Plugins": [
@@ -84,6 +104,14 @@
 		},
 		{
 			"Name": "GameplayInteractions",
+			"Enabled": true
+		},
+		{
+			"Name": "StateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayStateTree",
 			"Enabled": true
 		},
 		{
