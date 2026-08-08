@@ -13,11 +13,20 @@
 #include "Camera/CameraComponent.h"
 #include "TimerManager.h"
 #include "ShooterGameMode.h"
+#include "InputAction.h"
+#include "UObject/ConstructorHelpers.h"
 
 AShooterCharacter::AShooterCharacter()
 {
 	// create the noise emitter component
 	PawnNoiseEmitter = CreateDefaultSubobject<UPawnNoiseEmitterComponent>(TEXT("Pawn Noise Emitter"));
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> AlternateFireActionAsset(
+		TEXT("/Game/WormholePortal/Demo/Input/Actions/IA_FirePortalB.IA_FirePortalB"));
+	if (AlternateFireActionAsset.Succeeded())
+	{
+		AlternateFireAction = AlternateFireActionAsset.Object;
+	}
 
 	// configure movement
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 600.0f, 0.0f);
@@ -53,6 +62,12 @@ void AShooterCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 		// Firing
 		EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &AShooterCharacter::DoStartFiring);
 		EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Completed, this, &AShooterCharacter::DoStopFiring);
+
+		if (AlternateFireAction)
+		{
+			EnhancedInputComponent->BindAction(AlternateFireAction, ETriggerEvent::Started, this, &AShooterCharacter::DoStartAlternateFiring);
+			EnhancedInputComponent->BindAction(AlternateFireAction, ETriggerEvent::Completed, this, &AShooterCharacter::DoStopAlternateFiring);
+		}
 
 		// Switch weapon
 		EnhancedInputComponent->BindAction(SwitchWeaponAction, ETriggerEvent::Triggered, this, &AShooterCharacter::DoSwitchWeapon);
@@ -137,6 +152,22 @@ void AShooterCharacter::DoStopFiring()
 	}
 }
 
+void AShooterCharacter::DoStartAlternateFiring()
+{
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->StartAlternateFiring();
+	}
+}
+
+void AShooterCharacter::DoStopAlternateFiring()
+{
+	if (CurrentWeapon && !IsDead())
+	{
+		CurrentWeapon->StopAlternateFiring();
+	}
+}
+
 void AShooterCharacter::DoSwitchWeapon()
 {
 	// ensure we have at least two weapons two switch between
@@ -169,14 +200,19 @@ void AShooterCharacter::DoSwitchWeapon()
 
 void AShooterCharacter::AttachWeaponMeshes(AShooterWeapon* Weapon)
 {
-	const FAttachmentTransformRules AttachmentRule(EAttachmentRule::SnapToTarget, false);
+	const FAttachmentTransformRules ActorAttachmentRule(EAttachmentRule::SnapToTarget, false);
+	const FAttachmentTransformRules MeshAttachmentRule(
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::SnapToTarget,
+		EAttachmentRule::KeepRelative,
+		false);
 
 	// attach the weapon actor
-	Weapon->AttachToActor(this, AttachmentRule);
+	Weapon->AttachToActor(this, ActorAttachmentRule);
 
-	// attach the weapon meshes
-	Weapon->GetFirstPersonMesh()->AttachToComponent(GetFirstPersonMesh(), AttachmentRule, FirstPersonWeaponSocket);
-	Weapon->GetThirdPersonMesh()->AttachToComponent(GetMesh(), AttachmentRule, FirstPersonWeaponSocket);
+	// Snap location and rotation while preserving each weapon mesh's authored scale.
+	Weapon->GetFirstPersonMesh()->AttachToComponent(GetFirstPersonMesh(), MeshAttachmentRule, FirstPersonWeaponSocket);
+	Weapon->GetThirdPersonMesh()->AttachToComponent(GetMesh(), MeshAttachmentRule, ThirdPersonWeaponSocket);
 	
 }
 
@@ -255,11 +291,13 @@ void AShooterCharacter::OnWeaponActivated(AShooterWeapon* Weapon)
 	// set the character mesh AnimInstances
 	GetFirstPersonMesh()->SetAnimInstanceClass(Weapon->GetFirstPersonAnimInstanceClass());
 	GetMesh()->SetAnimInstanceClass(Weapon->GetThirdPersonAnimInstanceClass());
+
+	GetFirstPersonMesh()->SetHiddenInGame(Weapon->ShouldHideFirstPersonCharacterMesh(), false);
 }
 
 void AShooterCharacter::OnWeaponDeactivated(AShooterWeapon* Weapon)
 {
-	// unused
+	GetFirstPersonMesh()->SetHiddenInGame(false, false);
 }
 
 void AShooterCharacter::OnSemiWeaponRefire()

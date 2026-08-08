@@ -35,6 +35,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category ="Input")
 	UInputAction* FireAction;
 
+	/** Alternate fire input action. Used by weapons such as the portal gun. */
+	UPROPERTY(EditAnywhere, Category ="Input")
+	UInputAction* AlternateFireAction;
+
 	/** Switch weapon input action */
 	UPROPERTY(EditAnywhere, Category ="Input")
 	UInputAction* SwitchWeaponAction;
@@ -131,6 +135,14 @@ public:
 	/** Handles stop firing input */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	void DoStopFiring();
+
+	/** Handles start alternate firing input */
+	UFUNCTION(BlueprintCallable, Category="Input")
+	void DoStartAlternateFiring();
+
+	/** Handles stop alternate firing input */
+	UFUNCTION(BlueprintCallable, Category="Input")
+	void DoStopAlternateFiring();
 
 	/** Handles switch weapon input */
 	UFUNCTION(BlueprintCallable, Category="Input")

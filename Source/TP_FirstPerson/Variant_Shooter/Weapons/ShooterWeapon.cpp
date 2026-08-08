@@ -52,6 +52,14 @@ void AShooterWeapon::BeginPlay()
 
 	// attach the meshes to the owner
 	WeaponOwner->AttachWeaponMeshes(this);
+
+	// Apply per-weapon presentation offsets after snapping to the character sockets.
+	FirstPersonMesh->SetRelativeLocationAndRotation(
+		FirstPersonMeshLocationOffset,
+		FirstPersonMeshRotationOffset);
+	ThirdPersonMesh->SetRelativeLocationAndRotation(
+		ThirdPersonMeshLocationOffset,
+		ThirdPersonMeshRotationOffset);
 }
 
 void AShooterWeapon::EndPlay(EEndPlayReason::Type EndPlayReason)
@@ -124,6 +132,16 @@ void AShooterWeapon::StopFiring()
 
 	// clear the refire timer
 	GetWorld()->GetTimerManager().ClearTimer(RefireTimer);
+}
+
+void AShooterWeapon::StartAlternateFiring()
+{
+	// Optional weapon feature.
+}
+
+void AShooterWeapon::StopAlternateFiring()
+{
+	// Optional weapon feature.
 }
 
 void AShooterWeapon::Fire()

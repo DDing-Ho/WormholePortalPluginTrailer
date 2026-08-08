@@ -22,6 +22,16 @@
 				"AIModule",
 				"UMG"
 			]
+		},
+		{
+			"Name": "WPFinalDemo",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"TP_FirstPerson",
+				"WormholePortalRuntime"
+			]
 		}
 	],
 	"Plugins": [

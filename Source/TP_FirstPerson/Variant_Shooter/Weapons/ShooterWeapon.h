@@ -61,6 +61,26 @@ protected:
 	UPROPERTY(EditAnywhere, Category="Animation")
 	TSubclassOf<UAnimInstance> ThirdPersonAnimInstanceClass;
 
+	/** Location offset applied after the first person mesh snaps to the character's weapon socket */
+	UPROPERTY(EditAnywhere, Category="Presentation|First Person", meta = (Units = "cm"))
+	FVector FirstPersonMeshLocationOffset = FVector::ZeroVector;
+
+	/** Rotation offset applied after the first person mesh snaps to the character's weapon socket */
+	UPROPERTY(EditAnywhere, Category="Presentation|First Person", meta = (Units = "Degrees"))
+	FRotator FirstPersonMeshRotationOffset = FRotator::ZeroRotator;
+
+	/** Location offset applied after the third person mesh snaps to the character's weapon socket */
+	UPROPERTY(EditAnywhere, Category="Presentation|Third Person", meta = (Units = "cm"))
+	FVector ThirdPersonMeshLocationOffset = FVector::ZeroVector;
+
+	/** Rotation offset applied after the third person mesh snaps to the character's weapon socket */
+	UPROPERTY(EditAnywhere, Category="Presentation|Third Person", meta = (Units = "Degrees"))
+	FRotator ThirdPersonMeshRotationOffset = FRotator::ZeroRotator;
+
+	/** Hide only the owner's first person body/arms while this weapon is active. */
+	UPROPERTY(EditAnywhere, Category="Presentation|First Person")
+	bool bHideFirstPersonCharacterMesh = false;
+
 	/** Cone half-angle for variance while aiming */
 	UPROPERTY(EditAnywhere, Category="Aim", meta = (ClampMin = 0, ClampMax = 90, Units = "Degrees"))
 	float AimVariance = 0.0f;
@@ -142,6 +162,12 @@ public:
 	/** Stop firing this weapon */
 	void StopFiring();
 
+	/** Start this weapon's alternate fire mode. Weapons without one leave this as a no-op. */
+	virtual void StartAlternateFiring();
+
+	/** Stop this weapon's alternate fire mode. Weapons without one leave this as a no-op. */
+	virtual void StopAlternateFiring();
+
 protected:
 
 	/** Fire the weapon */
@@ -171,6 +197,9 @@ public:
 
 	/** Returns the third person anim instance class */
 	const TSubclassOf<UAnimInstance>& GetThirdPersonAnimInstanceClass() const;
+
+	/** Returns whether the owner's first person body/arms should be hidden for this weapon. */
+	bool ShouldHideFirstPersonCharacterMesh() const { return bHideFirstPersonCharacterMesh; }
 
 	/** Returns the magazine size */
 	int32 GetMagazineSize() const { return MagazineSize; };
