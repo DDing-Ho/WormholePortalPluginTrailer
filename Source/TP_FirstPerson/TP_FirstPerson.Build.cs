@@ -18,7 +18,8 @@ public class TP_FirstPerson : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
-			"Slate"
+			"Slate",
+			"WormholePortalRuntime"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

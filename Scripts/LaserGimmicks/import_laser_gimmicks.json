@@ -1,0 +1,15 @@
+{
+  "ImportGroups": [
+    {
+      "GroupName": "LaserGimmickMeshes",
+      "Filenames": [
+        "SourceArt/LaserGimmicks/SM_LaserEmitter.obj",
+        "SourceArt/LaserGimmicks/SM_LaserReceiver.obj",
+        "SourceArt/LaserGimmicks/SM_LaserRedirectorCube.obj"
+      ],
+      "DestinationPath": "/Game/GameAnimationSample/Gimmicks/Laser/Meshes",
+      "bReplaceExisting": true,
+      "bSkipReadOnly": false
+    }
+  ]
+}

@@ -11,8 +11,8 @@ class UBoxComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
+class UStaticMesh;
 class UStaticMeshComponent;
-class UTexture;
 
 /**
  * A laser target that stays active while at least one Laser Emitter is hitting it.
@@ -33,12 +33,14 @@ public:
 	int32 GetActiveLaserCount() const;
 
 protected:
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void HandleReceiverStateChanged(bool bNewActive) override;
 
 private:
 	void RefreshContactState();
+	void ApplyVisualAsset();
 	void InitializeVisualMaterials();
 	void UpdateReceiverVisuals(bool bActive);
 
@@ -50,15 +52,6 @@ private:
 	TObjectPtr<UStaticMeshComponent> ReceiverBody;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UStaticMeshComponent> ReceiverGlow;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UStaticMeshComponent> ReceiverCore;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
-	TArray<TObjectPtr<UStaticMeshComponent>> ReceiverRingSegments;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UPointLightComponent> ReceiverLight;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
@@ -67,20 +60,20 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
 	FLinearColor ActiveColor = FLinearColor(1.0f, 0.015f, 0.002f, 1.0f);
 
-	UPROPERTY()
-	TObjectPtr<UMaterialInterface> EmissiveMaterial;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMesh> LaserVisualMesh;
 
-	UPROPERTY()
-	TObjectPtr<UTexture> EmissiveTexture;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> ShellMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> MechanismMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> OpticMaterial;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> GlowMaterial;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> CoreMaterial;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UMaterialInstanceDynamic>> RingMaterials;
+	TObjectPtr<UMaterialInstanceDynamic> ReceiverOpticMaterial;
 
 	TSet<TWeakObjectPtr<ALaserEmitter>> ActiveEmitters;
 };

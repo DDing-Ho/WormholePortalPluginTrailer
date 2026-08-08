@@ -8,6 +8,7 @@
 
 class ALaserReceiver;
 class UArrowComponent;
+class UBoxComponent;
 class UDamageType;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -42,15 +43,20 @@ public:
 	FLaserEnabledChanged OnLaserEnabledChanged;
 
 protected:
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	void UpdateLaser();
 	void UpdateReceiverContact(ALaserReceiver* NewReceiver);
+	void UpdateRedirectorContacts(const TSet<TWeakObjectPtr<AActor>>& NewRedirectors);
 	void ReleaseReceiverContact();
+	void ReleaseRedirectorContacts();
+	void ReleaseAllLaserContacts();
 	void ApplyDamageToFinalHit(const FHitResult& FinalHit, const FVector& BeamDirection, float ElapsedSeconds);
 
+	void ApplyVisualAsset();
 	void InitializeVisualMaterials();
 	void ApplyEmitterVisualState();
 	void SetBeamSegment(int32 SegmentIndex, const FVector& Start, const FVector& End);
@@ -65,14 +71,15 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> SceneRoot;
 
+	/** Stable gameplay collision kept independent from the authored visual mesh. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UBoxComponent> EmitterCollision;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> EmitterBody;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UArrowComponent> Muzzle;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UStaticMeshComponent> MuzzleGlow;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UPointLightComponent> MuzzleLight;
@@ -98,6 +105,10 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Portal", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
 	int32 MaxPortalDepth = 4;
 
+	/** Maximum number of redirectors a single beam path may use before terminating. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Redirector", meta = (AllowPrivateAccess = "true", ClampMin = "0", UIMin = "0"))
+	int32 MaxRedirectDepth = 4;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Portal", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float PortalExitOffset = 2.0f;
 
@@ -117,11 +128,26 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
 	FLinearColor CoreColor = FLinearColor(1.0f, 0.82f, 0.72f, 1.0f);
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	FLinearColor InactiveOpticColor = FLinearColor(0.04f, 0.09f, 0.12f, 1.0f);
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true", ClampMin = "0.05", UIMin = "0.05", Units = "cm"))
 	float BeamCoreRadius = 0.8f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true", ClampMin = "0.1", UIMin = "0.1", Units = "cm"))
 	float BeamGlowRadius = 3.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMesh> LaserVisualMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> ShellMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> MechanismMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Laser|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> OpticMaterial;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> CylinderMesh;
@@ -133,7 +159,7 @@ private:
 	TObjectPtr<UTexture> EmissiveTexture;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> MuzzleMaterial;
+	TObjectPtr<UMaterialInstanceDynamic> EmitterOpticMaterial;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ImpactMaterial;
@@ -151,6 +177,7 @@ private:
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> BeamGlowMaterials;
 
 	TWeakObjectPtr<ALaserReceiver> CurrentReceiver;
+	TSet<TWeakObjectPtr<AActor>> CurrentRedirectors;
 	FTimerHandle LaserUpdateTimer;
 	double LastLaserUpdateSeconds = 0.0;
 };

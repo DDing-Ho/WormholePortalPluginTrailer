@@ -1,0 +1,14 @@
+{
+  "ImportGroups": [
+    {
+      "GroupName": "EnergyBallGimmickMeshes",
+      "Filenames": [
+        "SourceArt/EnergyBallGimmicks/SM_EnergyBallEmitter.obj",
+        "SourceArt/EnergyBallGimmicks/SM_EnergyBallReceiver.obj"
+      ],
+      "DestinationPath": "/Game/GameAnimationSample/Gimmicks/EnergyBall/Meshes",
+      "bReplaceExisting": true,
+      "bSkipReadOnly": false
+    }
+  ]
+}

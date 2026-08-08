@@ -8,7 +8,12 @@
 
 class AEnergyBall;
 class UArrowComponent;
+class UBoxComponent;
+class UMaterialInstanceDynamic;
+class UMaterialInterface;
+class UPointLightComponent;
 class USceneComponent;
+class UStaticMesh;
 class UStaticMeshComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FEnergyBallFired, AEnergyBall*, EnergyBall);
@@ -41,15 +46,27 @@ public:
 	FEnergyBallFired OnEnergyBallFired;
 
 protected:
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
 	void HandleFireTimer();
 	void PruneInactiveBalls();
+	void ApplyVisualAsset();
+	void InitializeVisualMaterials();
+	void UpdateEmitterVisuals(bool bActive);
+
+	UFUNCTION()
+	void OnRep_IsFiring();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> SceneRoot;
+
+	/** Stable gameplay collision kept independent from the authored visual mesh. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UBoxComponent> EmitterCollision;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UStaticMeshComponent> EmitterMesh;
@@ -57,6 +74,9 @@ private:
 	/** Defines the exact spawn location and firing direction. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UArrowComponent> Muzzle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UPointLightComponent> EmitterLight;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Firing", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AEnergyBall> EnergyBallClass;
@@ -78,7 +98,30 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Firing", meta = (AllowPrivateAccess = "true", EditCondition = "bStartActive"))
 	bool bFireImmediately = true;
 
+	UPROPERTY(ReplicatedUsing = OnRep_IsFiring, VisibleInstanceOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Firing", meta = (AllowPrivateAccess = "true"))
+	bool bIsFiring = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMesh> EnergyBallVisualMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> ShellMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> MechanismMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Appearance", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> OpticMaterial;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Appearance", meta = (AllowPrivateAccess = "true", HideAlphaChannel))
+	FLinearColor InactiveOpticColor = FLinearColor(0.035f, 0.075f, 0.10f, 1.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Appearance", meta = (AllowPrivateAccess = "true", HideAlphaChannel))
+	FLinearColor ActiveOpticColor = FLinearColor(1.0f, 0.055f, 0.003f, 1.0f);
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> EmitterOpticMaterial;
+
 	FTimerHandle FireTimer;
 	TArray<TWeakObjectPtr<AEnergyBall>> ActiveBalls;
-	bool bIsFiring = false;
 };

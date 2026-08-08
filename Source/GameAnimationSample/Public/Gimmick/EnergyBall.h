@@ -9,6 +9,7 @@
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
+class UPrimitiveComponent;
 class UProjectileMovementComponent;
 class USceneComponent;
 class USphereComponent;
@@ -63,6 +64,11 @@ private:
 
 	UFUNCTION()
 	void HandleProjectileStop(const FHitResult& Hit);
+
+	UFUNCTION()
+	void HandleProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity);
+
+	void TrySpawnScorchMark(const FHitResult& Hit);
 
 	/** Collision Primitive moved by Projectile Movement and inspected by Portal Transit. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball", meta = (AllowPrivateAccess = "true"))
@@ -151,6 +157,30 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Lifetime", meta = (AllowPrivateAccess = "true"))
 	bool bDestroyOnImpact = true;
 
+	/** Leaves a cosmetic scorch decal after valid blocking hits on Static Mesh components. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Impact", meta = (AllowPrivateAccess = "true"))
+	bool bSpawnScorchMarks = true;
+
+	/** Deferred decal material used for scorch marks. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Impact", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> ScorchDecalMaterial;
+
+	/** Local X is projection depth; local Y/Z define the surface footprint. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Impact", meta = (AllowPrivateAccess = "true", Units = "cm"))
+	FVector ScorchDecalSize = FVector(8.0f, 40.0f, 40.0f);
+
+	/** Pushes the decal origin away from the hit surface to avoid z-fighting. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Impact", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float ScorchSurfaceOffset = 1.0f;
+
+	/** Total scorch lifetime. Zero keeps the cosmetic decal indefinitely. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Impact", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float ScorchLifetime = 60.0f;
+
+	/** Fade duration at the end of ScorchLifetime. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Impact", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", Units = "s"))
+	float ScorchFadeDuration = 5.0f;
+
 	/** Zero keeps the Ball alive until impact or consumption. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Game Animation Sample|Energy Ball|Lifetime", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", Units = "s"))
 	float MaxLifeSeconds = 10.0f;
@@ -171,5 +201,8 @@ private:
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> TrailMaterials;
 
 	float VisualTime = 0.0f;
+	TWeakObjectPtr<UPrimitiveComponent> LastScorchComponent;
+	FVector LastScorchImpactPoint = FVector::ZeroVector;
+	float LastScorchTimeSeconds = -1.0f;
 	bool bConsumed = false;
 };

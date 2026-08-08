@@ -6,12 +6,29 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "Subsystem/WPTransitSubsystem.h"
+#include "Transit/WPTransitTypes.h"
 
 UFirstPersonPhysicsGrabComponent::UFirstPersonPhysicsGrabComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	bSoftAngularConstraint = false;
+}
+
+void UFirstPersonPhysicsGrabComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UWPTransitSubsystem* TransitSubsystem = World->GetSubsystem<UWPTransitSubsystem>())
+		{
+			TransitStartedHandle = TransitSubsystem->OnTransitStarted().AddUObject(
+				this,
+				&UFirstPersonPhysicsGrabComponent::HandleTransitStarted);
+		}
+	}
 }
 
 bool UFirstPersonPhysicsGrabComponent::GrabActor()
@@ -50,16 +67,23 @@ bool UFirstPersonPhysicsGrabComponent::GrabActor()
 	}
 
 	bSoftAngularConstraint = false;
-	GrabComponentAtLocationWithRotation(HitComponent, HitResult.BoneName, HitResult.ImpactPoint, FRotator::ZeroRotator);
+	bAimHeldObjectWithView = HitComponent->ComponentHasTag(AimWithViewComponentTag);
+	const FVector GrabLocation = bAimHeldObjectWithView
+		? HitComponent->GetCenterOfMass(HitResult.BoneName)
+		: HitResult.ImpactPoint;
+	const FRotator TargetRotation = bAimHeldObjectWithView ? ViewRotation : FRotator::ZeroRotator;
+	GrabComponentAtLocationWithRotation(HitComponent, HitResult.BoneName, GrabLocation, TargetRotation);
 
 	if (!IsHoldingActor())
 	{
+		bAimHeldObjectWithView = false;
 		return false;
 	}
 
+	const float ActiveHoldDistance = bAimHeldObjectWithView ? AimableHoldDistance : HoldDistance;
 	SetTargetLocationAndRotation(
-		ViewLocation + ViewDirection * FMath::Max(HoldDistance, 0.0f),
-		FRotator::ZeroRotator);
+		ViewLocation + ViewDirection * FMath::Max(ActiveHoldDistance, 0.0f),
+		TargetRotation);
 	SetComponentTickEnabled(true);
 	return true;
 }
@@ -67,6 +91,7 @@ bool UFirstPersonPhysicsGrabComponent::GrabActor()
 void UFirstPersonPhysicsGrabComponent::DropActor()
 {
 	ReleaseComponent();
+	bAimHeldObjectWithView = false;
 	SetComponentTickEnabled(false);
 }
 
@@ -99,9 +124,10 @@ void UFirstPersonPhysicsGrabComponent::TickComponent(
 	}
 	else
 	{
+		const float ActiveHoldDistance = bAimHeldObjectWithView ? AimableHoldDistance : HoldDistance;
 		SetTargetLocationAndRotation(
-			ViewLocation + ViewRotation.Vector() * FMath::Max(HoldDistance, 0.0f),
-			FRotator::ZeroRotator);
+			ViewLocation + ViewRotation.Vector() * FMath::Max(ActiveHoldDistance, 0.0f),
+			bAimHeldObjectWithView ? ViewRotation : FRotator::ZeroRotator);
 	}
 
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -109,8 +135,29 @@ void UFirstPersonPhysicsGrabComponent::TickComponent(
 
 void UFirstPersonPhysicsGrabComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (TransitStartedHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UWPTransitSubsystem* TransitSubsystem = World->GetSubsystem<UWPTransitSubsystem>())
+			{
+				TransitSubsystem->OnTransitStarted().Remove(TransitStartedHandle);
+			}
+		}
+		TransitStartedHandle.Reset();
+	}
+
 	DropActor();
 	Super::EndPlay(EndPlayReason);
+}
+
+void UFirstPersonPhysicsGrabComponent::HandleTransitStarted(const FWPTransitEvent& Event)
+{
+	UPrimitiveComponent* HeldComponent = GetGrabbedComponent();
+	if (IsValid(HeldComponent) && HeldComponent->GetOwner() == Event.Actor.Get())
+	{
+		DropActor();
+	}
 }
 
 bool UFirstPersonPhysicsGrabComponent::GetOwnerView(FVector& OutLocation, FRotator& OutRotation) const

@@ -6,36 +6,18 @@
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/Texture.h"
 #include "Gimmick/LaserEmitter.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
-#include "Math/RotationMatrix.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
 {
-	constexpr int32 LaserReceiverRingSegmentCount = 16;
-	const FName ColorParameterName(TEXT("Color"));
-	const FName TextureParameterName(TEXT("Texture"));
-
-	void ConfigureReceiverEnergyMesh(UStaticMeshComponent* Mesh, const int32 SortPriority)
-	{
-		if (!IsValid(Mesh)) return;
-
-		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Mesh->SetGenerateOverlapEvents(false);
-		Mesh->SetCastShadow(false);
-		Mesh->SetReceivesDecals(false);
-		Mesh->SetTranslucentSortPriority(SortPriority);
-	}
-
-	FLinearColor MakeEmissiveColor(const FLinearColor& Color, const float Strength)
-	{
-		FLinearColor Result = Color * FMath::Max(Strength, 0.0f);
-		Result.A = 1.0f;
-		return Result;
-	}
+	const FName EffectColorParameterName(TEXT("EffectColor"));
+	const FName EmissiveStrengthParameterName(TEXT("EmissiveStrength"));
+	const FName ShellSlotName(TEXT("Shell"));
+	const FName MechanismSlotName(TEXT("Mechanism"));
+	const FName OpticSlotName(TEXT("Optic"));
 }
 
 ALaserReceiver::ALaserReceiver()
@@ -51,82 +33,51 @@ ALaserReceiver::ALaserReceiver()
 
 	ReceiverBody = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ReceiverBody"));
 	ReceiverBody->SetupAttachment(TargetSurface);
-	ReceiverBody->SetRelativeRotation(FRotator(0.0f, 90.0f, 0.0f));
-	ReceiverBody->SetRelativeScale3D(FVector(1.9f, 1.9f, 0.18f));
 	ReceiverBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ReceiverBody->SetGenerateOverlapEvents(false);
+	ReceiverBody->SetCastShadow(true);
 
-	ReceiverGlow = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ReceiverGlow"));
-	ReceiverGlow->SetupAttachment(TargetSurface);
-	ReceiverGlow->SetRelativeRotation(FRotator(0.0f, 90.0f, 0.0f));
-	ReceiverGlow->SetRelativeScale3D(FVector(1.42f, 1.42f, 0.055f));
-	ConfigureReceiverEnergyMesh(ReceiverGlow, 1);
-
-	ReceiverCore = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ReceiverCore"));
-	ReceiverCore->SetupAttachment(TargetSurface);
-	ReceiverCore->SetRelativeScale3D(FVector(0.32f));
-	ConfigureReceiverEnergyMesh(ReceiverCore, 3);
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	if (CylinderMesh.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> VisualMeshAsset(
+		TEXT("/Game/GameAnimationSample/Gimmicks/Laser/Meshes/SM_LaserReceiver.SM_LaserReceiver"));
+	if (VisualMeshAsset.Succeeded())
 	{
-		ReceiverBody->SetStaticMesh(CylinderMesh.Object);
-		ReceiverGlow->SetStaticMesh(CylinderMesh.Object);
+		LaserVisualMesh = VisualMeshAsset.Object;
 	}
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (SphereMesh.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ShellMaterialAsset(
+		TEXT("/Game/GameAnimationSample/Gimmicks/Laser/Materials/MI_LaserShell.MI_LaserShell"));
+	if (ShellMaterialAsset.Succeeded())
 	{
-		ReceiverCore->SetStaticMesh(SphereMesh.Object);
+		ShellMaterial = ShellMaterialAsset.Object;
 	}
 
-	for (int32 SegmentIndex = 0; SegmentIndex < LaserReceiverRingSegmentCount; ++SegmentIndex)
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MechanismMaterialAsset(
+		TEXT("/Game/GameAnimationSample/Gimmicks/Laser/Materials/MI_LaserMechanism.MI_LaserMechanism"));
+	if (MechanismMaterialAsset.Succeeded())
 	{
-		const FName SegmentName(*FString::Printf(TEXT("ReceiverRing_%02d"), SegmentIndex));
-		UStaticMeshComponent* Segment = CreateDefaultSubobject<UStaticMeshComponent>(SegmentName);
-		Segment->SetupAttachment(TargetSurface);
-		ConfigureReceiverEnergyMesh(Segment, 2);
-
-		if (CylinderMesh.Succeeded())
-		{
-			Segment->SetStaticMesh(CylinderMesh.Object);
-		}
-
-		const float Angle = UE_TWO_PI * static_cast<float>(SegmentIndex) / static_cast<float>(LaserReceiverRingSegmentCount);
-		const float RingRadius = 82.0f;
-		const FVector RingLocation(0.0f, FMath::Cos(Angle) * RingRadius, FMath::Sin(Angle) * RingRadius);
-		const FVector RingTangent(0.0f, -FMath::Sin(Angle), FMath::Cos(Angle));
-		Segment->SetRelativeLocation(RingLocation);
-		Segment->SetRelativeRotation(FRotationMatrix::MakeFromZ(RingTangent).Rotator());
-		Segment->SetRelativeScale3D(FVector(0.045f, 0.045f, 0.29f));
-		ReceiverRingSegments.Add(Segment);
+		MechanismMaterial = MechanismMaterialAsset.Object;
 	}
 
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> AdditiveMaterial(
-		TEXT("/Engine/EngineMaterials/EmissiveMeshMaterial.EmissiveMeshMaterial"));
-	if (AdditiveMaterial.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> OpticMaterialAsset(
+		TEXT("/Game/GameAnimationSample/Gimmicks/Laser/Materials/MI_LaserOptic.MI_LaserOptic"));
+	if (OpticMaterialAsset.Succeeded())
 	{
-		EmissiveMaterial = AdditiveMaterial.Object;
-		ReceiverGlow->SetMaterial(0, EmissiveMaterial);
-		ReceiverCore->SetMaterial(0, EmissiveMaterial);
-		for (UStaticMeshComponent* Segment : ReceiverRingSegments)
-		{
-			Segment->SetMaterial(0, EmissiveMaterial);
-		}
+		OpticMaterial = OpticMaterialAsset.Object;
 	}
 
-	static ConstructorHelpers::FObjectFinder<UTexture> WhiteTexture(
-		TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
-	if (WhiteTexture.Succeeded())
-	{
-		EmissiveTexture = WhiteTexture.Object;
-	}
+	ApplyVisualAsset();
 
 	ReceiverLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("ReceiverLight"));
 	ReceiverLight->SetupAttachment(TargetSurface);
 	ReceiverLight->SetRelativeLocation(FVector(24.0f, 0.0f, 0.0f));
 	ReceiverLight->SetAttenuationRadius(280.0f);
 	ReceiverLight->SetCastShadows(false);
+}
+
+void ALaserReceiver::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyVisualAsset();
 }
 
 void ALaserReceiver::BeginPlay()
@@ -148,7 +99,7 @@ void ALaserReceiver::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ALaserReceiver::SetLaserContact(ALaserEmitter* LaserEmitter, const bool bInContact)
 {
-	if (!HasAuthority() || !IsValid(LaserEmitter)) return;
+	if (!HasAuthority() || LaserEmitter == nullptr) return;
 
 	const TWeakObjectPtr<ALaserEmitter> EmitterKey(LaserEmitter);
 	if (bInContact)
@@ -197,55 +148,54 @@ void ALaserReceiver::RefreshContactState()
 
 void ALaserReceiver::InitializeVisualMaterials()
 {
-	if (!IsValid(EmissiveMaterial)) return;
-
-	auto CreateMaterial = [this](UStaticMeshComponent* Mesh) -> UMaterialInstanceDynamic*
+	ApplyVisualAsset();
+	ReceiverOpticMaterial = nullptr;
+	if (IsValid(ReceiverBody))
 	{
-		if (!IsValid(Mesh)) return nullptr;
-
-		UMaterialInstanceDynamic* Material = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-		if (IsValid(Material) && IsValid(EmissiveTexture))
+		const int32 OpticMaterialIndex = ReceiverBody->GetMaterialIndex(OpticSlotName);
+		if (OpticMaterialIndex != INDEX_NONE)
 		{
-			Material->SetTextureParameterValue(TextureParameterName, EmissiveTexture);
+			ReceiverOpticMaterial = ReceiverBody->CreateAndSetMaterialInstanceDynamic(OpticMaterialIndex);
 		}
-		return Material;
-	};
-
-	GlowMaterial = CreateMaterial(ReceiverGlow);
-	CoreMaterial = CreateMaterial(ReceiverCore);
-	RingMaterials.Reset(ReceiverRingSegments.Num());
-	for (UStaticMeshComponent* Segment : ReceiverRingSegments)
-	{
-		RingMaterials.Add(CreateMaterial(Segment));
 	}
 }
 
 void ALaserReceiver::UpdateReceiverVisuals(const bool bActive)
 {
 	const FLinearColor StateColor = bActive ? ActiveColor : InactiveColor;
-	const float GlowStrength = bActive ? 3.5f : 0.22f;
-	const float CoreStrength = bActive ? 8.0f : 0.45f;
-	const float RingStrength = bActive ? 5.5f : 0.30f;
-
-	if (IsValid(GlowMaterial))
+	if (IsValid(ReceiverOpticMaterial))
 	{
-		GlowMaterial->SetVectorParameterValue(ColorParameterName, MakeEmissiveColor(StateColor, GlowStrength));
-	}
-	if (IsValid(CoreMaterial))
-	{
-		CoreMaterial->SetVectorParameterValue(ColorParameterName, MakeEmissiveColor(StateColor, CoreStrength));
-	}
-	for (UMaterialInstanceDynamic* RingMaterial : RingMaterials)
-	{
-		if (IsValid(RingMaterial))
-		{
-			RingMaterial->SetVectorParameterValue(ColorParameterName, MakeEmissiveColor(StateColor, RingStrength));
-		}
+		ReceiverOpticMaterial->SetVectorParameterValue(EffectColorParameterName, StateColor);
+		ReceiverOpticMaterial->SetScalarParameterValue(
+			EmissiveStrengthParameterName,
+			bActive ? 8.0f : 0.35f);
 	}
 
 	if (IsValid(ReceiverLight))
 	{
 		ReceiverLight->SetLightColor(StateColor);
 		ReceiverLight->SetIntensity(bActive ? 3200.0f : 70.0f);
+	}
+}
+
+void ALaserReceiver::ApplyVisualAsset()
+{
+	if (!IsValid(ReceiverBody)) return;
+
+	ReceiverBody->SetStaticMesh(LaserVisualMesh);
+	const int32 ShellIndex = ReceiverBody->GetMaterialIndex(ShellSlotName);
+	const int32 MechanismIndex = ReceiverBody->GetMaterialIndex(MechanismSlotName);
+	const int32 OpticIndex = ReceiverBody->GetMaterialIndex(OpticSlotName);
+	if (ShellIndex != INDEX_NONE && IsValid(ShellMaterial))
+	{
+		ReceiverBody->SetMaterial(ShellIndex, ShellMaterial);
+	}
+	if (MechanismIndex != INDEX_NONE && IsValid(MechanismMaterial))
+	{
+		ReceiverBody->SetMaterial(MechanismIndex, MechanismMaterial);
+	}
+	if (OpticIndex != INDEX_NONE && IsValid(OpticMaterial))
+	{
+		ReceiverBody->SetMaterial(OpticIndex, OpticMaterial);
 	}
 }

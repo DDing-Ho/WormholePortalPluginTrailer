@@ -6,6 +6,8 @@
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "FirstPersonPhysicsGrabComponent.generated.h"
 
+struct FWPTransitEvent;
+
 /**
  * Physics-handle based grabber that traces from its owner's view and keeps the
  * grabbed body at a configurable distance in front of the player.
@@ -35,11 +37,13 @@ public:
 	bool IsHoldingActor() const;
 
 protected:
+	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	bool GetOwnerView(FVector& OutLocation, FRotator& OutRotation) const;
+	void HandleTransitStarted(const FWPTransitEvent& Event);
 
 	/** Maximum distance in which a physics body can be selected. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Shooter|Grab", meta=(AllowPrivateAccess="true", ClampMin="0.0", Units="cm"))
@@ -49,7 +53,18 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Shooter|Grab", meta=(AllowPrivateAccess="true", ClampMin="0.0", Units="cm"))
 	float HoldDistance = 500.0f;
 
+	/** Hold distance used by objects whose grabbed Primitive has AimWithViewComponentTag. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Shooter|Grab", meta=(AllowPrivateAccess="true", ClampMin="0.0", Units="cm"))
+	float AimableHoldDistance = 200.0f;
+
+	/** Tagged grabbed Primitives rotate with the owner's view while held. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Shooter|Grab", meta=(AllowPrivateAccess="true"))
+	FName AimWithViewComponentTag = FName(TEXT("AimWithView"));
+
 	/** Uses complex collision for the view trace. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Shooter|Grab", meta=(AllowPrivateAccess="true"))
 	bool bTraceComplex = false;
+
+	FDelegateHandle TransitStartedHandle;
+	bool bAimHeldObjectWithView = false;
 };

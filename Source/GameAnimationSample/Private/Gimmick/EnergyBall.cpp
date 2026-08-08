@@ -2,13 +2,17 @@
 
 #include "Gimmick/EnergyBall.h"
 
+#include "Components/DecalComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "Gimmick/EnergyReceiverBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Math/RotationMatrix.h"
@@ -21,6 +25,8 @@ namespace
 {
 	constexpr int32 EnergyArcCount = 7;
 	constexpr int32 TrailWispCount = 5;
+	constexpr float ScorchDuplicateTimeSeconds = 0.1f;
+	constexpr float ScorchDuplicateDistanceSquared = 4.0f;
 	const FName ColorParameterName(TEXT("Color"));
 	const FName TextureParameterName(TEXT("Texture"));
 
@@ -134,6 +140,13 @@ AEnergyBall::AEnergyBall()
 		EmissiveTexture = WhiteTexture.Object;
 	}
 
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ScorchMaterial(
+		TEXT("/Game/GameAnimationSample/Gimmicks/EnergyBall/Effects/M_EnergyBallScorch.M_EnergyBallScorch"));
+	if (ScorchMaterial.Succeeded())
+	{
+		ScorchDecalMaterial = ScorchMaterial.Object;
+	}
+
 	BallLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("BallLight"));
 	BallLight->SetupAttachment(CollisionSphere);
 	BallLight->SetLightColor(EnergyColor);
@@ -163,6 +176,7 @@ void AEnergyBall::BeginPlay()
 	InitializeVisualMaterials();
 	UpdateEnergyVisuals(0.0f);
 	ProjectileMovement->OnProjectileStop.AddUniqueDynamic(this, &AEnergyBall::HandleProjectileStop);
+	ProjectileMovement->OnProjectileBounce.AddUniqueDynamic(this, &AEnergyBall::HandleProjectileBounce);
 
 	if (MaxLifeSeconds > 0.0f)
 	{
@@ -371,7 +385,10 @@ void AEnergyBall::UpdateEnergyVisuals(const float DeltaSeconds)
 
 void AEnergyBall::HandleProjectileStop(const FHitResult& Hit)
 {
-	if (!HasAuthority() || bConsumed || !bDestroyOnImpact || ActorHasTag(WPTransitTags::Generated)) return;
+	if (!HasAuthority() || bConsumed || ActorHasTag(WPTransitTags::Generated)) return;
+
+	TrySpawnScorchMark(Hit);
+	if (!bDestroyOnImpact) return;
 
 	bConsumed = true;
 	OnImpacted(Hit);
@@ -382,4 +399,74 @@ void AEnergyBall::HandleProjectileStop(const FHitResult& Hit)
 	}
 
 	Destroy();
+}
+
+void AEnergyBall::HandleProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity)
+{
+	(void)ImpactVelocity;
+	if (!HasAuthority() || bConsumed || ActorHasTag(WPTransitTags::Generated)) return;
+
+	TrySpawnScorchMark(ImpactResult);
+}
+
+void AEnergyBall::TrySpawnScorchMark(const FHitResult& Hit)
+{
+	if (!bSpawnScorchMarks || !IsValid(ScorchDecalMaterial) || !Hit.bBlockingHit) return;
+
+	UStaticMeshComponent* HitMesh = Cast<UStaticMeshComponent>(Hit.GetComponent());
+	AActor* HitActor = Hit.GetActor();
+	if (!IsValid(HitMesh) || !HitMesh->bReceivesDecals || !IsValid(HitActor)) return;
+	if (HitActor->IsA<AEnergyReceiverBase>() || HitActor->IsA<APawn>()
+		|| HitActor->ActorHasTag(WPTransitTags::Generated))
+	{
+		return;
+	}
+
+	const FVector ImpactPoint = Hit.ImpactPoint;
+	const FVector ImpactNormal = Hit.ImpactNormal.GetSafeNormal();
+	if (ImpactPoint.ContainsNaN() || ImpactNormal.ContainsNaN() || ImpactNormal.IsNearlyZero()) return;
+
+	const UWorld* World = GetWorld();
+	if (!IsValid(World)) return;
+
+	const float CurrentTimeSeconds = World->GetTimeSeconds();
+	if (LastScorchComponent.Get() == HitMesh
+		&& LastScorchTimeSeconds >= 0.0f
+		&& CurrentTimeSeconds - LastScorchTimeSeconds <= ScorchDuplicateTimeSeconds
+		&& FVector::DistSquared(ImpactPoint, LastScorchImpactPoint) <= ScorchDuplicateDistanceSquared)
+	{
+		return;
+	}
+
+	const FVector DecalSize(
+		FMath::Max(ScorchDecalSize.X, 0.1f),
+		FMath::Max(ScorchDecalSize.Y, 0.1f),
+		FMath::Max(ScorchDecalSize.Z, 0.1f));
+	const FVector DecalLocation = ImpactPoint + ImpactNormal * FMath::Max(ScorchSurfaceOffset, 0.0f);
+	FRotator DecalRotation = FRotationMatrix::MakeFromX(-ImpactNormal).Rotator();
+	const float LocationHash = ImpactPoint.X * 0.73f + ImpactPoint.Y * 1.37f + ImpactPoint.Z * 2.11f;
+	DecalRotation.Roll = FMath::Fmod(FMath::Abs(LocationHash), 360.0f);
+
+	const float Lifetime = FMath::Max(ScorchLifetime, 0.0f);
+	const float FadeDuration = FMath::Clamp(ScorchFadeDuration, 0.0f, Lifetime);
+	const float ComponentLifeSpan = FadeDuration > 0.0f ? 0.0f : Lifetime;
+	UDecalComponent* ScorchDecal = UGameplayStatics::SpawnDecalAttached(
+		ScorchDecalMaterial,
+		DecalSize,
+		HitMesh,
+		NAME_None,
+		DecalLocation,
+		DecalRotation,
+		EAttachLocation::KeepWorldPosition,
+		ComponentLifeSpan);
+	if (!IsValid(ScorchDecal)) return;
+
+	if (Lifetime > 0.0f && FadeDuration > 0.0f)
+	{
+		ScorchDecal->SetFadeOut(Lifetime - FadeDuration, FadeDuration, true);
+	}
+
+	LastScorchComponent = HitMesh;
+	LastScorchImpactPoint = ImpactPoint;
+	LastScorchTimeSeconds = CurrentTimeSeconds;
 }

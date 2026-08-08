@@ -1,0 +1,13 @@
+{
+  "ImportGroups": [
+    {
+      "GroupName": "EnergyBallScorchTexture",
+      "Filenames": [
+        "SourceArt/EnergyBallGimmicks/T_EnergyBallScorch.tga"
+      ],
+      "DestinationPath": "/Game/GameAnimationSample/Gimmicks/EnergyBall/Effects",
+      "bReplaceExisting": true,
+      "bSkipReadOnly": false
+    }
+  ]
+}
