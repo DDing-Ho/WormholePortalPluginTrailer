@@ -22,6 +22,7 @@ public:
 		SHADER_PARAMETER(float, SpanMax)
 		SHADER_PARAMETER(float, ReduceMul)
 		SHADER_PARAMETER(float, ReduceMin)
+		SHADER_PARAMETER(uint32, FaceMask)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2DArray<float4>, InputCubeFaces)
 		SHADER_PARAMETER_SAMPLER(SamplerState, InputCubeSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2DArray<float4>, OutputCubeFaces)
@@ -39,4 +40,5 @@ bool AddWPCubeAAPass(
 	FRDGBuilder& GraphBuilder,
 	FRHITexture* InputCubeTexture,
 	FRHITexture* OutputCubeTexture,
-	bool bDirectPublish);
+	bool bDirectPublish,
+	uint8 FaceMask);

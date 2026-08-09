@@ -12,6 +12,7 @@
 #include "RenderingThread.h"
 #include "TextureResource.h"
 #include "Passes/WPCubeAAPass.h"
+#include "Rendering/WPSelectedCubeCapture.h"
 #include "WPRenderState.h"
 #include "WPSceneViewExtension.h"
 #include "WPLog.h"
@@ -600,7 +601,8 @@ bool FWPRendererService::EnqueueCubeAAPass(
 	UTextureRenderTargetCube& InputCubeTarget,
 	UTextureRenderTargetCube& OutputCubeTarget,
 	UTextureRenderTargetCube& PublishedReferenceOwner,
-	const bool bDirectPublish)
+	const bool bDirectPublish,
+	const uint8 FaceMask)
 {
 	check(IsInGameThread());
 #if !UE_BUILD_SHIPPING
@@ -640,7 +642,8 @@ bool FWPRendererService::EnqueueCubeAAPass(
 		[InputCubeTexture = Preflight.InputTexture,
 			OutputCubeTexture = Preflight.OutputTexture,
 			PublishedReference = Preflight.PublishedReference,
-			bDirectPublish](
+			bDirectPublish,
+			FaceMask](
 			FRHICommandListImmediate& RHICmdList)
 		{
 			SCOPE_CYCLE_COUNTER(STAT_WP_CubeAASetup);
@@ -654,7 +657,8 @@ bool FWPRendererService::EnqueueCubeAAPass(
 				GraphBuilder,
 				InputCubeTexture.GetReference(),
 				OutputCubeTexture.GetReference(),
-				bDirectPublish))
+				bDirectPublish,
+				FaceMask))
 			{
 				ensureAlwaysMsgf(
 					false,
@@ -670,7 +674,19 @@ bool FWPRendererService::EnqueueCubeAAPass(
 					OutputCubeTexture.GetReference());
 			}
 		});
+#if !UE_BUILD_SHIPPING
+	WP_LOG(&InputCubeTarget, VeryVerbose,
+		TEXT("[GameThread][CubeAA] Enqueued. Input=%s Output=%s FaceMask=0x%02x DirectPublish=%d GameThreadWait=0 CpuMs=%.4f"),
+		*InputCubeTarget.GetName(), *OutputCubeTarget.GetName(), static_cast<uint32>(FaceMask & 0x3f),
+		bDirectPublish ? 1 : 0, (FPlatformTime::Seconds() - StartSeconds) * 1000.0);
+#endif
 	return true;
+}
+
+bool FWPRendererService::AddSelectedCubeCaptureRenderer(
+	USceneCaptureComponentCube& CaptureComponent, const uint8 SelectedFaceMask, ISceneRenderBuilder& SceneRenderBuilder)
+{
+	return AddWPSelectedCubeCaptureRenderer(CaptureComponent, SelectedFaceMask, SceneRenderBuilder);
 }
 
 void FWPRendererService::UnregisterPair(const FWPRenderHandle& Handle)

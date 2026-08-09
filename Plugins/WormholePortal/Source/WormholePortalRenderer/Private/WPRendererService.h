@@ -36,7 +36,10 @@ public:
 		UTextureRenderTargetCube& InputCubeTarget,
 		UTextureRenderTargetCube& OutputCubeTarget,
 		UTextureRenderTargetCube& PublishedReferenceOwner,
-		bool bDirectPublish) override;
+		bool bDirectPublish,
+		uint8 FaceMask) override;
+	virtual bool AddSelectedCubeCaptureRenderer(
+		USceneCaptureComponentCube& CaptureComponent, uint8 SelectedFaceMask, ISceneRenderBuilder& SceneRenderBuilder) override;
 	virtual void UnregisterPair(const FWPRenderHandle& Handle) override;
 
 	/** Drains all SceneViewExtension callbacks and queued render commands before the module unloads. */

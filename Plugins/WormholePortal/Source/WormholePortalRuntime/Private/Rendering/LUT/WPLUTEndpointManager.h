@@ -36,6 +36,8 @@ struct WORMHOLEPORTALRUNTIME_API FWPLUTEndpointSnapshot
 {
 	TWeakObjectPtr<AWormholePortalActor> Portal;
 	TWeakObjectPtr<UVolumeTexture> VolumeTexture;
+	/** Shared CPU view of the bound LUT. This pointer does not duplicate voxel memory per Endpoint or Pair. */
+	TSharedPtr<const FWPLUTVolumeData, ESPMode::ThreadSafe> CPUVolumeData;
 	FWPLUTDescriptor RequestedDescriptor = FWPLUTDescriptor::MakeDefault();
 	FWPLUTDescriptor BoundDescriptor = FWPLUTDescriptor::MakeDefault();
 	FWPRayLUTContract Contract;

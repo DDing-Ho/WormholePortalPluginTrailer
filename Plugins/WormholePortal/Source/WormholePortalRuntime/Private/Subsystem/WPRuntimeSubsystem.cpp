@@ -2364,7 +2364,7 @@ void UWPRuntimeSubsystem::Tick(float DeltaTime)
 					Pair.Value.Capture.Visibility.LastOwnershipEpoch = 0;
 					Pair.Value.Capture.Visibility.LastSampleSequence = 0;
 					Pair.Value.Capture.Visibility.LastSampleReceiptSeconds = -1.0e30;
-					Pair.Value.Capture.Visibility.LastVisibleEndpointCount = 2;
+					Pair.Value.Capture.Visibility.LastVisibleEndpointMask = 0x3;
 					Pair.Value.Capture.Visibility.RejectedOwnershipEpoch = 0;
 					Pair.Value.Capture.Visibility.RejectedThroughSampleSequence = 0;
 					Pair.Value.Capture.Visibility.InvisibleElapsedSeconds = 0.0;

@@ -1,4 +1,4 @@
-// Copyright 2026 Team Beaver Studio. All Rights Reserved.
+// Copyright 2026 Team Beaver. All Rights Reserved.
 
 #include "SWPTransitManagerSettingsPanel.h"
 

@@ -13,6 +13,7 @@ float EdgeThresholdMin;
 float SpanMax;
 float ReduceMul;
 float ReduceMin;
+uint FaceMask;
 
 float WPCubeAALuma(float3 LinearHDR)
 {
@@ -47,6 +48,14 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     const float2 UV = ((float2)Pixel + 0.5f) * CubeInvExtent;
     const float4 Center = WPCubeAASample(UV, FaceIndex);
+
+    // Unselected slices already contain the previous completed AA result. Copy them unchanged
+    // into the alternate physical cube so direct publication never double-filters stale faces.
+    if ((FaceMask & (1u << FaceIndex)) == 0u)
+    {
+        OutputCubeFaces[uint3(Pixel, FaceIndex)] = Center;
+        return;
+    }
 
     // Keep the one-texel face border untouched. Face-local FXAA must not blend
     // clamped samples into another cube face and create a new seam.

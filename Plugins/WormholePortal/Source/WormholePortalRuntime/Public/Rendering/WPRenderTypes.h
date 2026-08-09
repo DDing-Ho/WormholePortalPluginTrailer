@@ -57,7 +57,18 @@ struct FWPPairOwnershipFeedback
 	uint64 VisibilityOwnershipEpoch = 0;
 	uint64 VisibilityPacketSequence = 0;
 	uint64 VisibilitySampleSequence = 0;
-	uint32 VisibleEndpointCount = 0;
+	/**
+	 * Exact endpoint bits observed in the completed Player View render frame.
+	 * Bit 0 is endpoint A and bit 1 is endpoint B. Keeping the identity here lets the
+	 * Runtime intersect frustum and occlusion results before running detailed Metric rays.
+	 */
+	uint8 VisibleEndpointMask = 0;
+
+	uint32 GetVisibleEndpointCount() const
+	{
+		return ((VisibleEndpointMask & 0x1u) != 0 ? 1u : 0u)
+			+ ((VisibleEndpointMask & 0x2u) != 0 ? 1u : 0u);
+	}
 	/** Final even seqlock version enclosing a coherent mailbox snapshot. */
 	uint64 SnapshotVersion = 0;
 	/** Number of torn-read attempts discarded because they overlapped a writer. */

@@ -124,6 +124,9 @@ struct WORMHOLEPORTALRUNTIME_API FWPLUTBinding
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "LUT")
 	TObjectPtr<UVolumeTexture> VolumeTexture = nullptr;
 
+	/** Shared immutable CPU voxels used by capture-face prediction. One copy is owned per LUT cache entry, never per Pair. */
+	TSharedPtr<const FWPLUTVolumeData, ESPMode::ThreadSafe> CPUVolumeData;
+
 	/** Descriptor that produced the bound LUT texture. This may differ from the requested descriptor when runtime fallback is used. */
 	UPROPERTY(BlueprintReadOnly, Category = "LUT")
 	FWPLUTDescriptor Descriptor;

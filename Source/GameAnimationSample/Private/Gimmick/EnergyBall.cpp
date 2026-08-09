@@ -27,6 +27,7 @@ namespace
 	constexpr int32 TrailWispCount = 5;
 	constexpr float ScorchDuplicateTimeSeconds = 0.1f;
 	constexpr float ScorchDuplicateDistanceSquared = 4.0f;
+	constexpr int32 ForegroundTranslucencyStencilValue = 240;
 	const FName ColorParameterName(TEXT("Color"));
 	const FName TextureParameterName(TEXT("Texture"));
 
@@ -40,6 +41,8 @@ namespace
 		Mesh->SetCastShadow(false);
 		Mesh->SetReceivesDecals(false);
 		Mesh->SetTranslucentSortPriority(SortPriority);
+		Mesh->SetRenderCustomDepth(true);
+		Mesh->SetCustomDepthStencilValue(ForegroundTranslucencyStencilValue);
 	}
 
 	FLinearColor MakeEmissiveColor(const FLinearColor& Color, const float Strength)
@@ -122,7 +125,7 @@ AEnergyBall::AEnergyBall()
 	}
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> AdditiveMaterial(
-		TEXT("/Engine/EngineMaterials/EmissiveMeshMaterial.EmissiveMeshMaterial"));
+		TEXT("/Game/GameAnimationSample/Gimmicks/Shared/Materials/M_GimmickEmissiveCustomDepth.M_GimmickEmissiveCustomDepth"));
 	if (AdditiveMaterial.Succeeded())
 	{
 		EmissiveMaterial = AdditiveMaterial.Object;

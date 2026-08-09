@@ -62,6 +62,54 @@ namespace
 		Binding.Error = Error;
 		return Binding;
 	}
+
+	TSharedPtr<const FWPLUTVolumeData, ESPMode::ThreadSafe> CopyVolumeTextureToCPU(
+		UVolumeTexture* Texture, const FWPLUTDescriptor& InDescriptor, FString& OutError)
+	{
+		OutError.Reset();
+		if (!Texture || !Texture->GetPlatformData())
+		{
+			OutError = TEXT("Volume texture platform data is unavailable.");
+			return nullptr;
+		}
+
+		const FWPLUTDescriptor Descriptor = InDescriptor.GetSanitized();
+		const FIntVector ExpectedDimensions = Descriptor.GetDimensions();
+		FTexturePlatformData* PlatformData = Texture->GetPlatformData();
+		if (PlatformData->PixelFormat != PF_A32B32G32R32F || PlatformData->Mips.Num() != 1
+			|| PlatformData->SizeX != ExpectedDimensions.X || PlatformData->SizeY != ExpectedDimensions.Y)
+		{
+			OutError = TEXT("Volume texture platform layout does not match the LUT descriptor.");
+			return nullptr;
+		}
+
+		FTexture2DMipMap& Mip = PlatformData->Mips[0];
+		const int64 ExpectedBytes = static_cast<int64>(ExpectedDimensions.X) * ExpectedDimensions.Y
+			* ExpectedDimensions.Z * sizeof(FLinearColor);
+		if (Mip.SizeX != ExpectedDimensions.X || Mip.SizeY != ExpectedDimensions.Y || Mip.SizeZ != ExpectedDimensions.Z
+			|| Mip.BulkData.GetBulkDataSize() != ExpectedBytes)
+		{
+			OutError = TEXT("Volume texture mip bytes do not match the expected RGBA32F volume.");
+			return nullptr;
+		}
+
+		const void* Source = Mip.BulkData.LockReadOnly();
+		if (!Source)
+		{
+			Mip.BulkData.Unlock();
+			OutError = TEXT("Volume texture mip could not be locked for CPU prediction.");
+			return nullptr;
+		}
+
+		TSharedPtr<FWPLUTVolumeData, ESPMode::ThreadSafe> Result = MakeShared<FWPLUTVolumeData, ESPMode::ThreadSafe>();
+		Result->Descriptor = Descriptor;
+		Result->Dimensions = ExpectedDimensions;
+		Result->BuildHash = Descriptor.MakeBuildHash();
+		Result->Voxels.SetNumUninitialized(ExpectedDimensions.X * ExpectedDimensions.Y * ExpectedDimensions.Z);
+		FMemory::Memcpy(Result->Voxels.GetData(), Source, ExpectedBytes);
+		Mip.BulkData.Unlock();
+		return Result;
+	}
 }
 
 struct UWPLUTCacheSubsystem::FWaiter
@@ -82,6 +130,7 @@ struct UWPLUTCacheSubsystem::FCacheEntry
 	TSoftObjectPtr<UWPLUTAsset> Asset;
 	TObjectPtr<UWPLUTAsset> LoadedAsset = nullptr;
 	TObjectPtr<UVolumeTexture> Texture = nullptr;
+	TSharedPtr<const FWPLUTVolumeData, ESPMode::ThreadSafe> CPUVolumeData;
 
 	TArray<FWaiter> Waiters;
 	TSharedPtr<FStreamableHandle> StreamableHandle;
@@ -463,6 +512,24 @@ void UWPLUTCacheSubsystem::HandleAssetLoadComplete(const FString CacheKey, const
 	Entry->LoadedAsset = LoadedAsset;
 	Entry->Texture = LoadedAsset->VolumeTexture;
 	Entry->Descriptor = LoadedAsset->Descriptor.GetSanitized();
+	const double CPUCopyStartSeconds = FPlatformTime::Seconds();
+	FString CPUCopyError;
+	Entry->CPUVolumeData = CopyVolumeTextureToCPU(LoadedAsset->VolumeTexture, Entry->Descriptor, CPUCopyError);
+	if (!Entry->CPUVolumeData.IsValid())
+	{
+		WP_LOG(this, Warning,
+			TEXT("Baked LUT CPU prediction copy unavailable; face prediction will fail open. Asset=%s Error=%s CpuMs=%.3f"),
+			*Entry->Asset.ToSoftObjectPath().ToString(), *CPUCopyError,
+			(FPlatformTime::Seconds() - CPUCopyStartSeconds) * 1000.0);
+	}
+	else
+	{
+		WP_LOG(this, Verbose,
+			TEXT("Baked LUT CPU prediction copy ready. Asset=%s Bytes=%lld MiB=%.3f SharedPerCacheEntry=1 CpuMs=%.3f"),
+			*Entry->Asset.ToSoftObjectPath().ToString(), Entry->CPUVolumeData->GetByteCount(),
+			static_cast<double>(Entry->CPUVolumeData->GetByteCount()) / (1024.0 * 1024.0),
+			(FPlatformTime::Seconds() - CPUCopyStartSeconds) * 1000.0);
+	}
 	Entry->Source = EWPLUTSource::BakedAsset;
 	Entry->State = ECacheEntryState::Ready;
 	Entry->ResourceRevision = NextResourceRevision++;
@@ -587,6 +654,7 @@ void UWPLUTCacheSubsystem::HandleFallbackBuildComplete(
 
 	Entry->Texture = Texture;
 	Entry->Descriptor = VolumeData->Descriptor;
+	Entry->CPUVolumeData = VolumeData;
 	Entry->Source = EWPLUTSource::RuntimeFallback;
 	Entry->State = ECacheEntryState::Ready;
 	Entry->ResourceRevision = NextResourceRevision++;
@@ -684,6 +752,7 @@ FWPLUTBinding UWPLUTCacheSubsystem::MakeBinding(
 {
 	FWPLUTBinding Binding;
 	Binding.VolumeTexture = Entry.Texture;
+	Binding.CPUVolumeData = Entry.CPUVolumeData;
 	Binding.Descriptor = Entry.Descriptor;
 	Binding.TransitionRatio = TransitionRatio;
 	Binding.RatioCoordinate01 = Entry.Descriptor.ComputeRatioCoordinate01(TransitionRatio);
