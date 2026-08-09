@@ -38,10 +38,12 @@ bool AddWPCubeAAPass(
 	FRDGBuilder& GraphBuilder,
 	FRHITexture* InputCubeTexture,
 	FRHITexture* OutputCubeTexture,
-	const bool bDirectPublish)
+	const bool bDirectPublish,
+	const uint8 FaceMask)
 {
+	const uint8 SanitizedFaceMask = FaceMask & 0x3f;
 	if (!InputCubeTexture || !OutputCubeTexture
-		|| (bDirectPublish && InputCubeTexture == OutputCubeTexture))
+		|| SanitizedFaceMask == 0 || (bDirectPublish && InputCubeTexture == OutputCubeTexture))
 	{
 		return false;
 	}
@@ -133,6 +135,7 @@ bool AddWPCubeAAPass(
 	PassParameters->SpanMax = 8.0f;
 	PassParameters->ReduceMul = 0.125f;
 	PassParameters->ReduceMin = 1.0f / 128.0f;
+	PassParameters->FaceMask = SanitizedFaceMask;
 	PassParameters->InputCubeFaces =
 		GraphBuilder.CreateSRV(InputSRVDesc);
 	PassParameters->InputCubeSampler =
@@ -161,10 +164,10 @@ bool AddWPCubeAAPass(
 	RDG_EVENT_SCOPE_STAT(
 		GraphBuilder,
 		WPCubeAA,
-		"WP.CubeAA %dx%d Faces=%d HDR=Linear Source=RawScratch Output=%s CopyBack=%s",
+		"WP.CubeAA %dx%d FaceMask=0x%02x HDR=Linear Source=RawScratch Output=%s CopyBack=%s",
 		InputDesc.Extent.X,
 		InputDesc.Extent.Y,
-		WPCubeFaceCount,
+		static_cast<uint32>(SanitizedFaceMask),
 		bDirectPublish ? "DirectPublished" : "TransientFiltered",
 		bDirectPublish ? "Eliminated" : "ValidationFallback");
 	{

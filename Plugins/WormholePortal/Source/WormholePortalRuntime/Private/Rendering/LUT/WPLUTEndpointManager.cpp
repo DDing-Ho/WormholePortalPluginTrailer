@@ -827,6 +827,7 @@ FWPLUTEndpointSnapshot UWPLUTEndpointManager::MakeSnapshot(
 	FWPLUTEndpointSnapshot Snapshot;
 	Snapshot.Portal = State.Portal;
 	Snapshot.VolumeTexture = State.Binding.VolumeTexture.Get();
+	Snapshot.CPUVolumeData = State.Binding.CPUVolumeData;
 	Snapshot.RequestedDescriptor = State.RequestedDescriptor;
 	Snapshot.BoundDescriptor = State.Binding.Descriptor;
 	Snapshot.Contract = State.Contract;

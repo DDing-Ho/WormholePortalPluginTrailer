@@ -129,6 +129,17 @@ private:
 	uint64 OwnershipPreflightFailureCount = 0;
 	uint64 OwnershipPreflightPairFailureCount = 0;
 	uint64 OwnershipUnexpectedSubmissionFailureCount = 0;
+	// Logging only: TEMPORARY foreground-translucency restore pass diagnostics.
+	double TemporaryFrontTranslucencyRestoreAccumulatedPreflightCpuMs = 0.0;
+	double TemporaryFrontTranslucencyRestoreMaxPreflightCpuMs = 0.0;
+	double TemporaryFrontTranslucencyRestoreAccumulatedSetupCpuMs = 0.0;
+	double TemporaryFrontTranslucencyRestoreMaxSetupCpuMs = 0.0;
+	uint64 TemporaryFrontTranslucencyRestorePreflightAttemptCount = 0;
+	uint64 TemporaryFrontTranslucencyRestoreEligibleEndpointCount = 0;
+	uint64 TemporaryFrontTranslucencyRestoreSkippedNoCustomDepthCount = 0;
+	uint64 TemporaryFrontTranslucencyRestoreSkippedOtherCount = 0;
+	uint64 TemporaryFrontTranslucencyRestoreSubmittedPassCount = 0;
+	uint64 TemporaryFrontTranslucencyRestoreSubmissionFailureCount = 0;
 	// Test only: callback state used to inject forced production preflight or pass failures.
 	int32 LastObservedOwnershipForceFailureCallbacks = INDEX_NONE;
 	int32 RemainingOwnershipForceFailureCallbacks = 0;

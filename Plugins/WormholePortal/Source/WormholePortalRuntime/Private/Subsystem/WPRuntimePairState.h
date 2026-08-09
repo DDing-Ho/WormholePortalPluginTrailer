@@ -37,7 +37,14 @@ struct FWPCaptureVisibilityState
 	double LastSampleReceiptSeconds = -1.0e30;
 	uint64 LastOwnershipEpoch = 0;
 	uint64 LastSampleSequence = 0;
-	uint32 LastVisibleEndpointCount = 2;
+	// Latest coherent Player View frustum bits: bit 0 = A, bit 1 = B. Unknown state fails open to both.
+	uint8 LastVisibleEndpointMask = 0x3;
+
+	uint32 GetLastVisibleEndpointCount() const
+	{
+		return ((LastVisibleEndpointMask & 0x1u) != 0 ? 1u : 0u)
+			+ ((LastVisibleEndpointMask & 0x2u) != 0 ? 1u : 0u);
+	}
 
 	// Rejection barrier that prevents reuse of a sample discarded after a Camera-guard change or similar event.
 	uint64 RejectedOwnershipEpoch = 0;
@@ -247,7 +254,31 @@ struct FWPCaptureResolutionState
 	TUniquePtr<FRenderCommandFence> ReleaseFence;
 };
 
-/** Runtime capture-authority, cadence, and visibility-policy state for the Pair Cubemap. */
+/** One reference view's current and previous LUT-guided Cubemap face prediction. */
+struct FWPFacePredictionViewState
+{
+	uint8 CurrentLocalMask = 0x3f;
+	uint8 CurrentLinkedMask = 0x3f;
+	uint8 PreviousLocalMask = 0;
+	uint8 PreviousLinkedMask = 0;
+	double NextDueSeconds = 0.0;
+};
+
+/**
+ * Game Thread state for 25-Ray selective Cubemap capture.
+ * View A and View B are evaluated on different frames. Required masks union current and previous predictions so a
+ * moving camera cannot evict a recently required face before the replacement prediction is available.
+ */
+struct FWPFacePredictionState
+{
+	FWPFacePredictionViewState ViewA;
+	FWPFacePredictionViewState ViewB;
+	uint8 RequiredFaceMaskA = 0x3f;
+	uint8 RequiredFaceMaskB = 0x3f;
+	bool bNextEndpointA = true;
+};
+
+/** Runtime capture-authority, cadence, visibility, resolution, and selective-face state for the Pair Cubemap. */
 struct FWPPairCaptureState
 {
 	EWPCaptureAuthority Authority = EWPCaptureAuthority::RuntimeWarmup;
@@ -259,6 +290,7 @@ struct FWPPairCaptureState
 	double CadenceElapsedSeconds = 0.0;
 	FWPCaptureVisibilityState Visibility;
 	FWPCaptureResolutionState Resolution;
+	FWPFacePredictionState FacePrediction;
 	bool bNextStaggeredEndpointA = true;
 };
 

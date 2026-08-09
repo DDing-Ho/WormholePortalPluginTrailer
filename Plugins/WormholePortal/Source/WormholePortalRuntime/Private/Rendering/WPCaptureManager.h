@@ -26,6 +26,8 @@ struct WORMHOLEPORTALRUNTIME_API FWPCaptureEndpointSnapshot
 	uint32 CaptureGeneration = 0;
 	uint64 ResourceEpoch = 0;
 	bool bCubeAADirectPublish = true;
+	/** Cubemap slices initialized in this resource generation. Publication must not expose an incomplete first fill. */
+	uint8 InitialValidFaceMask = 0;
 
 	bool IsReadyForSubmission(const UWorld* ExpectedWorld) const;
 };
@@ -58,6 +60,8 @@ struct WORMHOLEPORTALRUNTIME_API FWPManagedPairCaptureResult
 	uint64 PairCaptureEpochAfter = 0;
 	bool bSubmittedA = false;
 	bool bSubmittedB = false;
+	uint8 SubmittedFaceMaskA = 0;
+	uint8 SubmittedFaceMaskB = 0;
 	bool bPairEpochCoherent = false;
 	bool bPairCycleCompleted = false;
 	bool bUsedTransitSynchronizedFirstPerson = false;
@@ -204,7 +208,8 @@ public:
 		AWormholePortalActor* PortalB,
 		uint64 ExpectedOwnershipEpoch,
 		EWPManagedCaptureSubmissionMode SubmissionMode,
-		FWPManagedPairCaptureResult& OutResult);
+		FWPManagedPairCaptureResult& OutResult,
+		uint8 SelectedFaceMask = 0x3f);
 
 	/** Immediately clears Camera hysteresis and the Transit snapshot on Pair unlink, relink, or World teardown. */
 	bool RemovePairCaptureState(const FGuid& PairId, const TCHAR* Reason);
@@ -233,6 +238,7 @@ private:
 		uint32 ResourceGeneration = 0;
 		uint32 CaptureGeneration = 0;
 		uint32 CaptureResolution = 0;
+		uint8 InitialValidFaceMask = 0;
 		bool bCubeAADirectPublish = true;
 		/** Logging only: CPU cost of this Endpoint allocation. */
 		double AllocationCpuMs = 0.0;
@@ -336,7 +342,8 @@ private:
 		// Logging only: label identifying the calculated Capture-position policy.
 		const TCHAR* PositionMode,
 		double& OutTransformCpuMs,
-		double& OutSubmitCpuMs);
+		double& OutSubmitCpuMs,
+		uint8 SelectedFaceMask);
 	void ResetFirstPersonTransitState(
 		FPairCaptureState& PairState,
 		const TCHAR* Reason,

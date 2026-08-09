@@ -28,7 +28,6 @@
 #include "Sound/SoundSourceBus.h"
 #include "Sound/SoundSubmix.h"
 #include "UObject/UObjectIterator.h"
-#include "GameFramework/Pawn.h"
 
 namespace WPPortalAudioPrivate
 {

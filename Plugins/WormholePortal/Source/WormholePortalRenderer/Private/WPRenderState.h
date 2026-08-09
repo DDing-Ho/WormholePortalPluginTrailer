@@ -72,11 +72,11 @@ struct FWPPairOwnershipFeedbackState
 		const uint64 Epoch,
 		const uint64 PacketSequence,
 		const uint32 RenderFrameNumber,
-		const uint32 InVisibleEndpointCount)
+		const uint8 InVisibleEndpointMask)
 	{
 		check(IsInRenderingThread());
 		AccumulateVisibilitySampleForRenderFrameInternal(
-			Epoch, PacketSequence, RenderFrameNumber, InVisibleEndpointCount);
+			Epoch, PacketSequence, RenderFrameNumber, InVisibleEndpointMask);
 	}
 
 	FORCEINLINE FWPPairOwnershipFeedback ReadGameThread(
@@ -107,10 +107,10 @@ struct FWPPairOwnershipFeedbackState
 	FORCEINLINE void RecordVisibilitySampleForTest(
 		const uint64 Epoch,
 		const uint64 PacketSequence,
-		const uint32 InVisibleEndpointCount)
+		const uint8 InVisibleEndpointMask)
 	{
 		RecordVisibilitySampleInternal(
-			Epoch, PacketSequence, InVisibleEndpointCount);
+			Epoch, PacketSequence, InVisibleEndpointMask);
 	}
 
 	/**
@@ -118,16 +118,16 @@ struct FWPPairOwnershipFeedbackState
 	 * automation tests.
 	 * The first observation only creates pending state. The first observation of the next
 	 * frame publishes
-	 * the previous frame's maximum visible-endpoint count to the mailbox exactly once.
+	 * the previous frame's endpoint-mask union to the mailbox exactly once.
 	 */
 	FORCEINLINE void AccumulateVisibilitySampleForRenderFrameForTest(
 		const uint64 Epoch,
 		const uint64 PacketSequence,
 		const uint32 RenderFrameNumber,
-		const uint32 InVisibleEndpointCount)
+		const uint8 InVisibleEndpointMask)
 	{
 		AccumulateVisibilitySampleForRenderFrameInternal(
-			Epoch, PacketSequence, RenderFrameNumber, InVisibleEndpointCount);
+			Epoch, PacketSequence, RenderFrameNumber, InVisibleEndpointMask);
 	}
 
 	FORCEINLINE void SetFeedbackSnapshotVersionForTest(const uint64 Version)
@@ -222,12 +222,12 @@ private:
 	FORCEINLINE void RecordVisibilitySampleInternal(
 		const uint64 Epoch,
 		const uint64 PacketSequence,
-		const uint32 InVisibleEndpointCount)
+		const uint8 InVisibleEndpointMask)
 	{
 		BeginFeedbackWrite_RenderThread();
 		VisibilityOwnershipEpoch.Store(Epoch);
 		VisibilityPacketSequence.Store(PacketSequence);
-		VisibleEndpointCount.Store(FMath::Min(InVisibleEndpointCount, 2u));
+		VisibleEndpointMask.Store(static_cast<uint32>(InVisibleEndpointMask & 0x3u));
 		++VisibilitySampleSequence;
 		EndFeedbackWrite_RenderThread();
 	}
@@ -236,25 +236,24 @@ private:
 		const uint64 Epoch,
 		const uint64 PacketSequence,
 		const uint32 RenderFrameNumber,
-		const uint32 InVisibleEndpointCount)
+		const uint8 InVisibleEndpointMask)
 	{
 		if (Epoch == 0 || PacketSequence == 0 || RenderFrameNumber == MAX_uint32)
 		{
 			return;
 		}
 
-		const uint32 ClampedVisibleEndpointCount =
-			FMath::Min(InVisibleEndpointCount, 2u);
+		const uint8 ClampedVisibleEndpointMask = static_cast<uint8>(
+			InVisibleEndpointMask & 0x3u);
 		const auto BeginPendingFrame =
 			[this, Epoch, PacketSequence, RenderFrameNumber,
-				ClampedVisibleEndpointCount]()
+				ClampedVisibleEndpointMask]()
 		{
 			bVisibilityRenderFramePending = true;
 			VisibilityPendingOwnershipEpoch = Epoch;
 			VisibilityPendingPacketSequence = PacketSequence;
 			VisibilityPendingRenderFrameNumber = RenderFrameNumber;
-			VisibilityPendingMaxVisibleEndpointCount =
-				ClampedVisibleEndpointCount;
+			VisibilityPendingVisibleEndpointMask = ClampedVisibleEndpointMask;
 			VisibilityPendingAcceptedFamilyCount = 1;
 		};
 
@@ -276,9 +275,7 @@ private:
 		if (VisibilityPendingRenderFrameNumber == RenderFrameNumber)
 		{
 			++VisibilityPendingAcceptedFamilyCount;
-			VisibilityPendingMaxVisibleEndpointCount = FMath::Max(
-				VisibilityPendingMaxVisibleEndpointCount,
-				ClampedVisibleEndpointCount);
+			VisibilityPendingVisibleEndpointMask |= ClampedVisibleEndpointMask;
 			if (VisibilityPendingPacketSequence != PacketSequence)
 			{
 				// Multiple packet revisions in one render frame cannot be tied to
@@ -286,7 +283,7 @@ private:
 				// result so the GT keeps A+B capture active.
 				VisibilityPendingPacketSequence = FMath::Max(
 					VisibilityPendingPacketSequence, PacketSequence);
-				VisibilityPendingMaxVisibleEndpointCount = 2;
+				VisibilityPendingVisibleEndpointMask = 0x3;
 			}
 			return;
 		}
@@ -297,7 +294,7 @@ private:
 		RecordVisibilitySampleInternal(
 			VisibilityPendingOwnershipEpoch,
 			VisibilityPendingPacketSequence,
-			VisibilityPendingMaxVisibleEndpointCount);
+			VisibilityPendingVisibleEndpointMask);
 		BeginPendingFrame();
 	}
 
@@ -365,7 +362,8 @@ private:
 				Result.VisibilityOwnershipEpoch = VisibilityOwnershipEpoch.Load();
 				Result.VisibilityPacketSequence = VisibilityPacketSequence.Load();
 				Result.VisibilitySampleSequence = VisibilitySampleSequence.Load();
-				Result.VisibleEndpointCount = VisibleEndpointCount.Load();
+				Result.VisibleEndpointMask = static_cast<uint8>(
+					VisibleEndpointMask.Load() & 0x3u);
 			}
 
 			const uint64 EndVersion = FeedbackSnapshotVersion.Load();
@@ -395,14 +393,14 @@ private:
 	TAtomic<uint64> VisibilityOwnershipEpoch{0};
 	TAtomic<uint64> VisibilityPacketSequence{0};
 	TAtomic<uint64> VisibilitySampleSequence{0};
-	TAtomic<uint32> VisibleEndpointCount{0};
+	TAtomic<uint32> VisibleEndpointMask{0};
 	// Render-thread-only pending frame. Multiple accepted view families are
-	// reduced with Max(VisibleEndpointCount) before one coherent mailbox write.
+	// reduced with a bitwise endpoint-mask union before one coherent mailbox write.
 	bool bVisibilityRenderFramePending = false;
 	uint64 VisibilityPendingOwnershipEpoch = 0;
 	uint64 VisibilityPendingPacketSequence = 0;
 	uint32 VisibilityPendingRenderFrameNumber = MAX_uint32;
-	uint32 VisibilityPendingMaxVisibleEndpointCount = 0;
+	uint8 VisibilityPendingVisibleEndpointMask = 0;
 	uint32 VisibilityPendingAcceptedFamilyCount = 0;
 };
 
@@ -542,7 +540,7 @@ struct FWPRenderThreadPacket
 	/** Publishes exact pair-endpoint visibility computed from an accepted primary view to the GT mailbox. */
 	FORCEINLINE void RecordVisibilitySample_RenderThread(
 		const uint32 RenderFrameNumber,
-		const int32 InVisibleEndpointCount) const
+		const uint8 InVisibleEndpointMask) const
 	{
 		if (OwnershipFeedbackState.IsValid())
 		{
@@ -550,7 +548,7 @@ struct FWPRenderThreadPacket
 				OwnershipEpoch,
 				PacketSequence,
 				RenderFrameNumber,
-				static_cast<uint32>(FMath::Clamp(InVisibleEndpointCount, 0, 2)));
+				static_cast<uint8>(InVisibleEndpointMask & 0x3u));
 		}
 	}
 };

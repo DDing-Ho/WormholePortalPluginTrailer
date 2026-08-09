@@ -20,6 +20,7 @@
 #include "Misc/App.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "RenderCommandFence.h"
+#include "SceneRenderBuilderInterface.h"
 #include "WormholePortalActor.h"
 #include "WPLog.h"
 #include "WPSettings.h"
@@ -696,7 +697,16 @@ int32 FWPManagedPairCaptureResult::GetSubmittedEndpointCount() const
 
 int32 FWPManagedPairCaptureResult::GetSubmittedFaceCount() const
 {
-	return GetSubmittedEndpointCount() * static_cast<int32>(WPCaptureFaceCount);
+	int32 Count = 0;
+	const uint8 CombinedMasks[2] = { SubmittedFaceMaskA, SubmittedFaceMaskB };
+	for (const uint8 Mask : CombinedMasks)
+	{
+		for (uint32 FaceIndex = 0; FaceIndex < WPCaptureFaceCount; ++FaceIndex)
+		{
+			Count += (Mask & static_cast<uint8>(1u << FaceIndex)) != 0 ? 1 : 0;
+		}
+	}
+	return Count;
 }
 
 UWorld* UWPCaptureManager::GetWorld() const
@@ -1864,6 +1874,7 @@ bool UWPCaptureManager::GetSnapshotFromRecord(
 	OutSnapshot.ResourceEpoch = Record->ResourceEpoch;
 	OutSnapshot.CaptureGeneration = Record->CaptureGeneration;
 	OutSnapshot.bCubeAADirectPublish = Record->bCubeAADirectPublish;
+	OutSnapshot.InitialValidFaceMask = Record->InitialValidFaceMask;
 	OutSnapshot.CubeContract.CubeLayoutVersion = WPCaptureLayoutVersion;
 	OutSnapshot.CubeContract.ResourceGeneration = Record->ResourceGeneration;
 	OutSnapshot.CubeContract.ExpectedExtent = FIntPoint(
@@ -1891,6 +1902,7 @@ bool UWPCaptureManager::ActivatePairResolutionPublication(
 		&& RetiredPublicationOverrides.Contains(KeyB)
 		&& NewA->ResourceGeneration != 0 && NewB->ResourceGeneration != 0
 		&& NewA->CaptureGeneration != 0 && NewB->CaptureGeneration != 0
+		&& NewA->InitialValidFaceMask == 0x3f && NewB->InitialValidFaceMask == 0x3f
 		&& NewA->CaptureResolution == NewB->CaptureResolution;
 	if (!bReady)
 	{
@@ -2335,12 +2347,15 @@ bool UWPCaptureManager::SubmitEndpointCapture(
 	const FVector& CaptureLocation,
 	const TCHAR* PositionMode,
 	double& OutTransformCpuMs,
-	double& OutSubmitCpuMs)
+	double& OutSubmitCpuMs,
+	const uint8 SelectedFaceMask)
 {
 	// 로그 전용: endpoint 전체/transform/submit CPU 시간을 구간별로 측정합니다.
 	const double EndpointStartSeconds = FPlatformTime::Seconds();
 	OutTransformCpuMs = 0.0;
 	OutSubmitCpuMs = 0.0;
+	const uint8 SanitizedFaceMask = SelectedFaceMask & 0x3f;
+	const bool bFullCubeCapture = SanitizedFaceMask == 0x3f;
 	USceneCaptureComponentCube* CaptureComponent = Record.CaptureComponent.Get();
 	UTextureRenderTargetCube* InputTarget = Record.CaptureTarget.Get();
 	UTextureRenderTargetCube* PublishedReferenceOwner = Record.RenderTarget.Get();
@@ -2349,7 +2364,7 @@ bool UWPCaptureManager::SubmitEndpointCapture(
 	UTextureRenderTargetCube* OutputTarget = Record.bCubeAADirectPublish
 		? AlternateTarget
 		: InputTarget;
-	const UWorld* World = ManagedWorld.Get();
+	UWorld* World = ManagedWorld.Get();
 	const bool bWorldSceneReady = IsValid(World) && World->Scene != nullptr;
 	const bool bDirectTargetTopologyValid = Record.bCubeAADirectPublish
 		&& IsValid(InputTarget)
@@ -2370,7 +2385,7 @@ bool UWPCaptureManager::SubmitEndpointCapture(
 		bDirectTargetTopologyValid || bLegacyTargetTopologyValid;
 	IWPRenderer* Renderer =
 		IWPRenderer::Find();
-	if (!IsFiniteVector(CaptureLocation) || !IsValid(CaptureComponent)
+	if (!IsFiniteVector(CaptureLocation) || SanitizedFaceMask == 0 || !IsValid(CaptureComponent)
 		|| !IsValid(InputTarget)
 		|| !IsValid(PublishedReferenceOwner)
 		|| !IsValid(OutputTarget)
@@ -2515,16 +2530,54 @@ bool UWPCaptureManager::SubmitEndpointCapture(
 	bool bCubeAAEnqueued = false;
 	{
 		SCOPE_CYCLE_COUNTER(STAT_WP_CubeCaptureSubmit);
-		CaptureComponent->CaptureScene();
+		bool bCaptureSubmitted = false;
+		double BuilderCreateCpuMs = 0.0;
+		double BuilderExecuteCpuMs = 0.0;
+		if (bFullCubeCapture)
+		{
+			CaptureComponent->CaptureScene();
+			bCaptureSubmitted = true;
+		}
+		else
+		{
+			const double BuilderStartSeconds = FPlatformTime::Seconds();
+			World->SendAllEndOfFrameUpdates();
+			TUniquePtr<ISceneRenderBuilder> SceneRenderBuilder = ISceneRenderBuilder::Create(World->Scene);
+			BuilderCreateCpuMs = (FPlatformTime::Seconds() - BuilderStartSeconds) * 1000.0;
+			bCaptureSubmitted = SceneRenderBuilder
+				&& Renderer->AddSelectedCubeCaptureRenderer(*CaptureComponent, SanitizedFaceMask, *SceneRenderBuilder);
+			if (bCaptureSubmitted)
+			{
+				const double ExecuteStartSeconds = FPlatformTime::Seconds();
+				SceneRenderBuilder->Execute();
+				BuilderExecuteCpuMs = (FPlatformTime::Seconds() - ExecuteStartSeconds) * 1000.0;
+			}
+		}
+		if (!bCaptureSubmitted)
+		{
+			OutSubmitCpuMs = (FPlatformTime::Seconds() - SubmitStartSeconds) * 1000.0;
+			WP_LOG(this, Error,
+				TEXT("[CaptureManager][SelectedCube] Submission failed. Portal=%s FaceMask=0x%02x FullCube=%d RendererAvailable=%d GameThreadWait=0 BuilderCreateCpuMs=%.4f SubmitCpuMs=%.4f"),
+				*GetNameSafe(Portal), static_cast<uint32>(SanitizedFaceMask), bFullCubeCapture ? 1 : 0,
+				Renderer ? 1 : 0, BuilderCreateCpuMs, OutSubmitCpuMs);
+			return false;
+		}
 		INC_DWORD_STAT(STAT_WP_CubeCapturesSubmitted);
+		int32 SelectedFaceCount = 0;
+		for (uint32 FaceIndex = 0; FaceIndex < WPCaptureFaceCount; ++FaceIndex)
+		{
+			SelectedFaceCount += (SanitizedFaceMask & static_cast<uint8>(1u << FaceIndex)) != 0 ? 1 : 0;
+		}
 		INC_FLOAT_STAT_BY(
 			STAT_WP_CubeCaptureMegapixels,
-			GetWPEndpointWorkMegapixels(Record.CaptureResolution));
+			static_cast<double>(Record.CaptureResolution) * Record.CaptureResolution
+				* SelectedFaceCount / 1'000'000.0);
 		bCubeAAEnqueued = Renderer->EnqueueCubeAAPass(
 			*InputTarget,
 			*OutputTarget,
 			*PublishedReferenceOwner,
-			Record.bCubeAADirectPublish);
+			Record.bCubeAADirectPublish,
+			SanitizedFaceMask);
 		ensureAlwaysMsgf(
 			bCubeAAEnqueued,
 			TEXT("CubeAA enqueue failed after successful same-submission preflight. ")
@@ -2551,6 +2604,14 @@ bool UWPCaptureManager::SubmitEndpointCapture(
 					GetWPCubeColorBytes(Record.CaptureResolution) * 2ull;
 			}
 			++Record.CaptureGeneration;
+			Record.InitialValidFaceMask |= SanitizedFaceMask;
+			WP_LOG(this, VeryVerbose,
+				TEXT("[CaptureManager][HybridCube] Completed. Portal=%s Resolution=%u Route=%s FaceMask=0x%02x Faces=%d InitialValidMask=0x%02x CaptureGeneration=%u ViewFamilies=1 SceneRenderers=1 AAEnqueued=1 UnselectedSlicesPreserved=%d GameThreadWait=0 BuilderCreateCpuMs=%.4f BuilderExecuteCpuMs=%.4f"),
+				*GetNameSafe(Portal), Record.CaptureResolution,
+				bFullCubeCapture ? TEXT("NativeCubeSinglePass") : TEXT("SelectedCubeSinglePass"),
+				static_cast<uint32>(SanitizedFaceMask), SelectedFaceCount,
+				static_cast<uint32>(Record.InitialValidFaceMask), Record.CaptureGeneration,
+				bFullCubeCapture ? 0 : 1, BuilderCreateCpuMs, BuilderExecuteCpuMs);
 		}
 	}
 	OutSubmitCpuMs = (FPlatformTime::Seconds() - SubmitStartSeconds) * 1000.0;
@@ -2582,12 +2643,15 @@ bool UWPCaptureManager::SubmitPairCapture(
 	AWormholePortalActor* PortalB,
 	const uint64 ExpectedOwnershipEpoch,
 	const EWPManagedCaptureSubmissionMode SubmissionMode,
-	FWPManagedPairCaptureResult& OutResult)
+	FWPManagedPairCaptureResult& OutResult,
+	const uint8 SelectedFaceMask)
 {
 	// 로그 전용: pair capture 전체 CPU 시간을 결과 telemetry에 기록합니다.
 	const double PairStartSeconds = FPlatformTime::Seconds();
 	OutResult = FWPManagedPairCaptureResult();
 	OutResult.SubmissionMode = SubmissionMode;
+	const uint8 SanitizedFaceMask = SubmissionMode == EWPManagedCaptureSubmissionMode::AtomicPair
+		? 0x3f : static_cast<uint8>(SelectedFaceMask & 0x3f);
 	FPairCaptureState* PairState = PairCaptureStates.Find(PairId);
 	const bool bTopologyMatches = PairState
 		&& ((PairState->PortalA.Get() == PortalA && PairState->PortalB.Get() == PortalB)
@@ -2602,7 +2666,7 @@ bool UWPCaptureManager::SubmitPairCapture(
 				: 0);
 	const bool bRepeatedStaggeredSide = PairState && bStaggeredSubmission
 		&& (PairState->StaggeredCompletionMask & SelectedEndpointMask) != 0;
-	if (!PairState || !PairState->bAuthorityEnabled || ExpectedOwnershipEpoch == 0
+	if (!PairState || !PairState->bAuthorityEnabled || ExpectedOwnershipEpoch == 0 || SanitizedFaceMask == 0
 		|| PairState->OwnershipEpoch != ExpectedOwnershipEpoch || !bTopologyMatches
 		|| PairState->LastSubmissionFrame == GFrameCounter
 		|| bRepeatedStaggeredSide)
@@ -2841,20 +2905,24 @@ bool UWPCaptureManager::SubmitPairCapture(
 	case EWPManagedCaptureSubmissionMode::AtomicPair:
 		OutResult.bSubmittedA = SubmitEndpointCapture(
 			*RecordA, PortalA, PortalB, CaptureLocationA, PositionModeA,
-			TransformCpuMsA, SubmitCpuMsA);
+			TransformCpuMsA, SubmitCpuMsA, 0x3f);
 		OutResult.bSubmittedB = OutResult.bSubmittedA && SubmitEndpointCapture(
 			*RecordB, PortalB, PortalA, CaptureLocationB, PositionModeB,
-			TransformCpuMsB, SubmitCpuMsB);
+			TransformCpuMsB, SubmitCpuMsB, 0x3f);
+		OutResult.SubmittedFaceMaskA = OutResult.bSubmittedA ? 0x3f : 0;
+		OutResult.SubmittedFaceMaskB = OutResult.bSubmittedB ? 0x3f : 0;
 		break;
 	case EWPManagedCaptureSubmissionMode::EndpointA:
 		OutResult.bSubmittedA = SubmitEndpointCapture(
 			*RecordA, PortalA, PortalB, CaptureLocationA, PositionModeA,
-			TransformCpuMsA, SubmitCpuMsA);
+			TransformCpuMsA, SubmitCpuMsA, SanitizedFaceMask);
+		OutResult.SubmittedFaceMaskA = OutResult.bSubmittedA ? SanitizedFaceMask : 0;
 		break;
 	case EWPManagedCaptureSubmissionMode::EndpointB:
 		OutResult.bSubmittedB = SubmitEndpointCapture(
 			*RecordB, PortalB, PortalA, CaptureLocationB, PositionModeB,
-			TransformCpuMsB, SubmitCpuMsB);
+			TransformCpuMsB, SubmitCpuMsB, SanitizedFaceMask);
+		OutResult.SubmittedFaceMaskB = OutResult.bSubmittedB ? SanitizedFaceMask : 0;
 		break;
 	default:
 		break;

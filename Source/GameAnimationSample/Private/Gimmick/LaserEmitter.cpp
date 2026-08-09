@@ -31,6 +31,7 @@ namespace
 	const FName ShellSlotName(TEXT("Shell"));
 	const FName MechanismSlotName(TEXT("Mechanism"));
 	const FName OpticSlotName(TEXT("Optic"));
+	constexpr int32 ForegroundTranslucencyStencilValue = 240;
 
 	void ConfigureLaserVisualMesh(UStaticMeshComponent* Mesh, const int32 SortPriority)
 	{
@@ -42,6 +43,8 @@ namespace
 		Mesh->SetCastShadow(false);
 		Mesh->SetReceivesDecals(false);
 		Mesh->SetTranslucentSortPriority(SortPriority);
+		Mesh->SetRenderCustomDepth(true);
+		Mesh->SetCustomDepthStencilValue(ForegroundTranslucencyStencilValue);
 	}
 
 	FLinearColor MakeEmissiveColor(const FLinearColor& Color, const float Strength)
@@ -139,7 +142,7 @@ ALaserEmitter::ALaserEmitter()
 	ApplyVisualAsset();
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> AdditiveMaterial(
-		TEXT("/Engine/EngineMaterials/EmissiveMeshMaterial.EmissiveMeshMaterial"));
+		TEXT("/Game/GameAnimationSample/Gimmicks/Shared/Materials/M_GimmickEmissiveCustomDepth.M_GimmickEmissiveCustomDepth"));
 	if (AdditiveMaterial.Succeeded())
 	{
 		EmissiveMaterial = AdditiveMaterial.Object;

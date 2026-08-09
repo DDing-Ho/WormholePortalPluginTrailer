@@ -7,6 +7,8 @@
 #include "Features/IModularFeature.h"
 #include "Features/IModularFeatures.h"
 
+class ISceneRenderBuilder;
+class USceneCaptureComponentCube;
 class UTextureRenderTargetCube;
 class UWorld;
 
@@ -107,7 +109,18 @@ public:
 		UTextureRenderTargetCube& InputCubeTarget,
 		UTextureRenderTargetCube& OutputCubeTarget,
 		UTextureRenderTargetCube& PublishedReferenceOwner,
-		bool bDirectPublish) = 0;
+		bool bDirectPublish,
+		uint8 FaceMask = 0x3f) = 0;
+
+	/** Stages selected Cubemap faces as one ViewFamily and one SceneRenderer. Runtime never exposes renderer-private types. */
+	virtual bool AddSelectedCubeCaptureRenderer(
+		USceneCaptureComponentCube& CaptureComponent, uint8 SelectedFaceMask, ISceneRenderBuilder& SceneRenderBuilder)
+	{
+		static_cast<void>(CaptureComponent);
+		static_cast<void>(SelectedFaceMask);
+		static_cast<void>(SceneRenderBuilder);
+		return false;
+	}
 
 	/**
 	 * Safely releases the Pair snapshot and World-extension reference. Game Thread only.

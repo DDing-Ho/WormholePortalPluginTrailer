@@ -1,6 +1,7 @@
 // Copyright 2026 Team Beaver. All Rights Reserved.
 
 using UnrealBuildTool;
+using System.IO;
 
 public class WormholePortalRenderer : ModuleRules
 {
@@ -20,5 +21,10 @@ public class WormholePortalRenderer : ModuleRules
 				"RHI",
 				"WormholePortalRuntime"
 			});
+
+		// Selected Cubemap rendering is isolated in WPSelectedCubeCapture.cpp. It uses renderer-private
+		// SceneRenderBuilder APIs without modifying Engine source files.
+		PrivateIncludePaths.Add(Path.Combine(EngineDirectory, "Source", "Runtime", "Renderer", "Private"));
+		PrivateIncludePaths.Add(Path.Combine(EngineDirectory, "Source", "Runtime", "Renderer", "Internal"));
 	}
 }

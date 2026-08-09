@@ -15,6 +15,7 @@
 #include "SceneView.h"
 #include "ScreenPass.h"
 #include "Passes/WPCompositePass.h"
+#include "Passes/WPTemporaryFrontTranslucencyRestorePass.h"
 #include "Math/WPPortalMaskMath.h"
 #include "WPLog.h"
 #include "WormholePortalStats.h"
@@ -761,7 +762,7 @@ namespace
 		TestTrue(TEXT("The same even version around field reads is stable."),
 			FWPPairOwnershipFeedbackState::IsStableFeedbackSnapshotVersion(4, 4));
 
-		FeedbackState.RecordVisibilitySampleForTest(9, 42, 2);
+		FeedbackState.RecordVisibilitySampleForTest(9, 42, 0x2);
 		const FWPPairOwnershipFeedback OwnershipOnlyFeedback =
 			FeedbackState.ReadGameThread(false);
 		TestTrue(TEXT("CVar-off ownership feedback remains coherent without visibility loads."),
@@ -774,8 +775,8 @@ namespace
 			OwnershipOnlyFeedback.VisibilityPacketSequence, 0ull);
 		TestEqual(TEXT("CVar-off feedback skips the visibility sample-sequence atomic."),
 			OwnershipOnlyFeedback.VisibilitySampleSequence, 0ull);
-		TestEqual(TEXT("CVar-off feedback skips the visible-endpoint-count atomic."),
-			OwnershipOnlyFeedback.VisibleEndpointCount, 0u);
+		TestEqual(TEXT("CVar-off feedback skips the visible-endpoint-mask atomic."),
+			OwnershipOnlyFeedback.VisibleEndpointMask, static_cast<uint8>(0));
 		Feedback = FeedbackState.ReadGameThread(true);
 		TestEqual(TEXT("CVar-on feedback reads the exact visibility epoch."),
 			Feedback.VisibilityOwnershipEpoch, 9ull);
@@ -783,27 +784,29 @@ namespace
 			Feedback.VisibilityPacketSequence, 42ull);
 		TestEqual(TEXT("CVar-on feedback reads one visibility sample."),
 			Feedback.VisibilitySampleSequence, 1ull);
-		TestEqual(TEXT("CVar-on feedback reads the clamped endpoint count."),
-			Feedback.VisibleEndpointCount, 2u);
+		TestEqual(TEXT("CVar-on feedback preserves the exact endpoint identity."),
+			Feedback.VisibleEndpointMask, static_cast<uint8>(0x2));
+		TestEqual(TEXT("Endpoint count remains derivable from the exact mask."),
+			Feedback.GetVisibleEndpointCount(), 1u);
 
 		FWPPairOwnershipFeedbackState FrameUnionFeedbackState;
 		FrameUnionFeedbackState.AccumulateVisibilitySampleForRenderFrameForTest(
-			9, 42, 100, 0);
+			9, 42, 100, 0x1);
 		Feedback = FrameUnionFeedbackState.ReadGameThread(true);
-		TestEqual(TEXT("The first family zero remains pending until its render frame completes."),
+		TestEqual(TEXT("The first family's A-only mask remains pending until its render frame completes."),
 			Feedback.VisibilitySampleSequence, 0ull);
 		FrameUnionFeedbackState.AccumulateVisibilitySampleForRenderFrameForTest(
-			9, 42, 100, 1);
+			9, 42, 100, 0x2);
 		Feedback = FrameUnionFeedbackState.ReadGameThread(true);
-		TestEqual(TEXT("A second family in the same frame cannot expose the partial zero."),
+		TestEqual(TEXT("A second family's B-only mask cannot expose a partial render-frame union."),
 			Feedback.VisibilitySampleSequence, 0ull);
 		FrameUnionFeedbackState.AccumulateVisibilitySampleForRenderFrameForTest(
 			9, 42, 101, 0);
 		Feedback = FrameUnionFeedbackState.ReadGameThread(true);
 		TestEqual(TEXT("The next frame publishes the completed prior frame exactly once."),
 			Feedback.VisibilitySampleSequence, 1ull);
-		TestEqual(TEXT("Any-visible union wins over another accepted family's zero."),
-			Feedback.VisibleEndpointCount, 1u);
+		TestEqual(TEXT("Accepted view families preserve the union of exact endpoint identities."),
+			Feedback.VisibleEndpointMask, static_cast<uint8>(0x3));
 		FrameUnionFeedbackState.AccumulateVisibilitySampleForRenderFrameForTest(
 			9, 42, 101, 0);
 		Feedback = FrameUnionFeedbackState.ReadGameThread(true);
@@ -812,8 +815,8 @@ namespace
 		FrameUnionFeedbackState.AccumulateVisibilitySampleForRenderFrameForTest(
 			9, 42, 102, 0);
 		Feedback = FrameUnionFeedbackState.ReadGameThread(true);
-		TestEqual(TEXT("A completed all-zero frame publishes one zero sample."),
-			Feedback.VisibleEndpointCount, 0u);
+		TestEqual(TEXT("A completed all-zero frame publishes one zero mask."),
+			Feedback.VisibleEndpointMask, static_cast<uint8>(0));
 		TestEqual(TEXT("The all-zero frame advances the mailbox once."),
 			Feedback.VisibilitySampleSequence, 2ull);
 		FrameUnionFeedbackState.AccumulateVisibilitySampleForRenderFrameForTest(
@@ -823,8 +826,8 @@ namespace
 		FrameUnionFeedbackState.AccumulateVisibilitySampleForRenderFrameForTest(
 			9, 43, 103, 0);
 		Feedback = FrameUnionFeedbackState.ReadGameThread(true);
-		TestEqual(TEXT("Mixed packet revisions in one render frame fail open as visible."),
-			Feedback.VisibleEndpointCount, 2u);
+		TestEqual(TEXT("Mixed packet revisions in one render frame fail open to both endpoints."),
+			Feedback.VisibleEndpointMask, static_cast<uint8>(0x3));
 		TestEqual(TEXT("The mixed-packet frame publishes its conservative latest packet."),
 			Feedback.VisibilityPacketSequence, 43ull);
 
@@ -1103,18 +1106,17 @@ void FWPSceneViewExtension::RecordVisibilityObservations_RenderThread(
 			Packet.PortalACenterWorld, SafeProxyRadiusA);
 		const bool bEndpointBVisible = IsEndpointVisible(
 			Packet.PortalBCenterWorld, SafeProxyRadiusB);
-		const int32 VisibleEndpointCount =
-			(bEndpointAVisible ? 1 : 0) + (bEndpointBVisible ? 1 : 0);
-
-		Packet.RecordVisibilitySample_RenderThread(
-			GFrameNumberRenderThread, VisibleEndpointCount);
-
-#if !UE_BUILD_SHIPPING
-		++VisibilityObservationSampleWriteCount;
 		const uint8 VisibleEndpointMask =
 			(bEndpointAVisible ? 0x1u : 0u)
 			| (bEndpointBVisible ? 0x2u : 0u);
 
+		Packet.RecordVisibilitySample_RenderThread(
+			GFrameNumberRenderThread, VisibleEndpointMask);
+
+#if !UE_BUILD_SHIPPING
+		const int32 VisibleEndpointCount =
+			(bEndpointAVisible ? 1 : 0) + (bEndpointBVisible ? 1 : 0);
+		++VisibilityObservationSampleWriteCount;
 		uint64 Fingerprint = 1469598103934665603ull;
 		Fingerprint = MixWPHash(Fingerprint, VisibleEndpointMask);
 		Fingerprint = MixWPHash(Fingerprint, Packet.ReferenceViewActorId);
@@ -1613,9 +1615,19 @@ bool FWPSceneViewExtension::TryPostProcessMultiPairOwnershipPass_RenderThread(
 		Inputs.GetInput(EPostProcessMaterialInput::SceneColor);
 	const FScreenPassTexture BaseSceneColor = FScreenPassTexture::CopyFromSlice(
 		GraphBuilder, SceneColorSlice);
-	FRDGTextureRef SceneDepthTexture = Inputs.SceneTextures.SceneTextures
+	const bool bHasSceneTextureParameters = Inputs.SceneTextures.SceneTextures;
+	FRDGTextureRef SceneDepthTexture = bHasSceneTextureParameters
 		? Inputs.SceneTextures.SceneTextures->GetParameters()->SceneDepthTexture
 		: nullptr;
+	const FRDGTextureRef TemporaryFrontTranslucencyCustomDepthTexture =
+		Inputs.CustomDepthTexture;
+	const FRDGTextureSRVRef TemporaryFrontTranslucencyCustomStencilTexture =
+		bHasSceneTextureParameters
+			? Inputs.SceneTextures.SceneTextures->GetParameters()->CustomStencilTexture
+			: nullptr;
+	const FWPTemporaryFrontTranslucencyRestoreSettings
+		TemporaryFrontTranslucencyRestoreSettings =
+			GetWPTemporaryFrontTranslucencyRestoreSettings_RenderThread();
 	const FRDGTextureRef SceneColorSourceTexture = SceneColorSlice.TextureSRV
 		? SceneColorSlice.TextureSRV->Desc.Texture : nullptr;
 	const bool bSceneColorUsesArray = SceneColorSourceTexture
@@ -1979,11 +1991,52 @@ bool FWPSceneViewExtension::TryPostProcessMultiPairOwnershipPass_RenderThread(
 		bool bBoundSceneDepthArray = false;
 		EWPCompositeFailureReason FailureReason =
 			EWPCompositeFailureReason::None;
+		EWPTemporaryFrontTranslucencyRestoreFailureReason TemporaryRestoreFailureReason =
+			EWPTemporaryFrontTranslucencyRestoreFailureReason::None;
+		bool bSubmitTemporaryRestore = false;
+		if (TemporaryFrontTranslucencyRestoreSettings.bEnabled)
+		{
+			++TemporaryFrontTranslucencyRestorePreflightAttemptCount;
+			// 로그 전용: TEMPORARY pass preflight CPU 비용만 측정한다.
+			const double TemporaryPreflightStartSeconds = FPlatformTime::Seconds();
+			bSubmitTemporaryRestore = ValidateWPTemporaryFrontTranslucencyRestorePass(
+				View,
+				CompositeInput,
+				BaseSceneColor,
+				SceneDepthTexture,
+				SceneDepthArraySlice,
+				TemporaryFrontTranslucencyCustomDepthTexture,
+				TemporaryFrontTranslucencyCustomStencilTexture,
+				TemporaryFrontTranslucencyRestoreSettings,
+				TemporaryRestoreFailureReason);
+			const double TemporaryPreflightCpuMs =
+				(FPlatformTime::Seconds() - TemporaryPreflightStartSeconds) * 1000.0;
+			TemporaryFrontTranslucencyRestoreAccumulatedPreflightCpuMs +=
+				TemporaryPreflightCpuMs;
+			TemporaryFrontTranslucencyRestoreMaxPreflightCpuMs = FMath::Max(
+				TemporaryFrontTranslucencyRestoreMaxPreflightCpuMs,
+				TemporaryPreflightCpuMs);
+			if (bSubmitTemporaryRestore)
+			{
+				++TemporaryFrontTranslucencyRestoreEligibleEndpointCount;
+			}
+			else if (TemporaryRestoreFailureReason
+				== EWPTemporaryFrontTranslucencyRestoreFailureReason::CustomDepthUnavailable)
+			{
+				++TemporaryFrontTranslucencyRestoreSkippedNoCustomDepthCount;
+			}
+			else
+			{
+				++TemporaryFrontTranslucencyRestoreSkippedOtherCount;
+			}
+		}
+		const bool bUseOverrideOutput =
+			ShouldUseWPOverrideOutput(EndpointIndex, GlobalEndpoints.Num());
 		++OwnershipRDGSetupAttemptCount;
 		// 로그 전용: endpoint RDG setup 비용만 측정하며 pass 제출 결과에는 관여하지 않는다.
 		const double SetupStartSeconds = FPlatformTime::Seconds();
 		const FScreenPassRenderTarget EndpointOverride =
-			ShouldUseWPOverrideOutput(EndpointIndex, GlobalEndpoints.Num())
+			bUseOverrideOutput && !bSubmitTemporaryRestore
 				? Inputs.OverrideOutput
 				: FScreenPassRenderTarget();
 		FScreenPassTexture EndpointOutput = AddWPCompositePass(
@@ -2030,6 +2083,78 @@ bool FWPSceneViewExtension::TryPostProcessMultiPairOwnershipPass_RenderThread(
 				(FPlatformTime::Seconds() - StartSeconds) * 1000.0);
 			OutOutput = Inputs.ReturnUntouchedSceneColorForPostProcessing(GraphBuilder);
 			return FinishCallback(true);
+		}
+		if (bSubmitTemporaryRestore)
+		{
+			// 로그 전용: TEMPORARY restore RDG setup 비용을 production composite와 분리한다.
+			const double TemporarySetupStartSeconds = FPlatformTime::Seconds();
+			FScreenPassTexture TemporaryRestoreOutput =
+				AddWPTemporaryFrontTranslucencyRestorePass(
+					GraphBuilder,
+					View,
+					EndpointOutput,
+					BaseSceneColor,
+					bUseOverrideOutput
+						? Inputs.OverrideOutput
+						: FScreenPassRenderTarget(),
+					SceneDepthTexture,
+					SceneDepthArraySlice,
+					TemporaryFrontTranslucencyCustomDepthTexture,
+					TemporaryFrontTranslucencyCustomStencilTexture,
+					Endpoint.Parameters,
+					TemporaryFrontTranslucencyRestoreSettings,
+					Pair.HandleValue,
+					TemporaryRestoreFailureReason);
+			const double TemporarySetupCpuMs =
+				(FPlatformTime::Seconds() - TemporarySetupStartSeconds) * 1000.0;
+			TemporaryFrontTranslucencyRestoreAccumulatedSetupCpuMs +=
+				TemporarySetupCpuMs;
+			TemporaryFrontTranslucencyRestoreMaxSetupCpuMs = FMath::Max(
+				TemporaryFrontTranslucencyRestoreMaxSetupCpuMs,
+				TemporarySetupCpuMs);
+			Pair.TotalSetupCpuMs += TemporarySetupCpuMs;
+			Pair.MaxSetupAttemptCpuMs = FMath::Max(
+				Pair.MaxSetupAttemptCpuMs,
+				SetupCpuMs + TemporarySetupCpuMs);
+			OwnershipAccumulatedSetupCpuMs += TemporarySetupCpuMs;
+			OwnershipMaxSetupCpuMs = FMath::Max(
+				OwnershipMaxSetupCpuMs,
+				SetupCpuMs + TemporarySetupCpuMs);
+			if (!TemporaryRestoreOutput.IsValid())
+			{
+				++TemporaryFrontTranslucencyRestoreSubmissionFailureCount;
+				FailPair(
+					Pair,
+					GetWPTemporaryFrontTranslucencyRestoreFailureReasonName(
+						TemporaryRestoreFailureReason),
+					TEXT("TemporaryFrontTranslucencyRestoreSubmission"));
+				for (FPairWork& RollbackPair : PairWorks)
+				{
+					if (!RollbackPair.bFailed && !RollbackPair.bLatchedSkip)
+					{
+						FailPair(
+							RollbackPair,
+							TEXT("ViewAtomicRollbackAfterTemporaryRestoreFailure"),
+							TEXT("TemporaryRestoreViewAtomicRollback"));
+					}
+				}
+				WP_LOG(nullptr, Error,
+					TEXT("[RenderThread][TemporaryFrontTranslucencyRestoreFailure][MultiPair] World=%s FailedPairId=%s FailedHandle=%llu EndpointIndex=%d EndpointCount=%d FailureReason=%s CustomStencil=%u FrontDepthBiasCm=%.3f TemporarySetupCpuMs=%.4f Implementation=WPTemporaryFrontTranslucencyRestorePass.cpp Shader=WPTemporaryFrontTranslucencyRestore.usf ViewAtomicRollback=1 PartialPairOutputCommitted=0 UntouchedSceneColor=1"),
+					*RenderState->WorldName,
+					*Pair.Packet->PairId.ToString(),
+					Pair.HandleValue,
+					EndpointIndex,
+					GlobalEndpoints.Num(),
+					GetWPTemporaryFrontTranslucencyRestoreFailureReasonName(
+						TemporaryRestoreFailureReason),
+					TemporaryFrontTranslucencyRestoreSettings.CustomStencilValue,
+					TemporaryFrontTranslucencyRestoreSettings.FrontDepthBiasCm,
+					TemporarySetupCpuMs);
+				OutOutput = Inputs.ReturnUntouchedSceneColorForPostProcessing(GraphBuilder);
+				return FinishCallback(true);
+			}
+			EndpointOutput = MoveTemp(TemporaryRestoreOutput);
+			++TemporaryFrontTranslucencyRestoreSubmittedPassCount;
 		}
 		CompositeInput = MoveTemp(EndpointOutput);
 		++Pair.SubmittedEndpointCount;
@@ -2541,9 +2666,19 @@ bool FWPSceneViewExtension::TryPostProcessOwnershipPass_RenderThread(
 			TEXT("InvalidBaseSceneColor"), 0.0, 0.0, VisibleEndpointCount);
 		return true;
 	}
-	FRDGTextureRef SceneDepthTexture = Inputs.SceneTextures.SceneTextures
+	const bool bHasSceneTextureParameters = Inputs.SceneTextures.SceneTextures;
+	FRDGTextureRef SceneDepthTexture = bHasSceneTextureParameters
 		? Inputs.SceneTextures.SceneTextures->GetParameters()->SceneDepthTexture
 		: nullptr;
+	const FRDGTextureRef TemporaryFrontTranslucencyCustomDepthTexture =
+		Inputs.CustomDepthTexture;
+	const FRDGTextureSRVRef TemporaryFrontTranslucencyCustomStencilTexture =
+		bHasSceneTextureParameters
+			? Inputs.SceneTextures.SceneTextures->GetParameters()->CustomStencilTexture
+			: nullptr;
+	const FWPTemporaryFrontTranslucencyRestoreSettings
+		TemporaryFrontTranslucencyRestoreSettings =
+			GetWPTemporaryFrontTranslucencyRestoreSettings_RenderThread();
 	const FRDGTextureRef SceneColorSourceTexture = SceneColorSlice.TextureSRV
 		? SceneColorSlice.TextureSRV->Desc.Texture
 		: nullptr;
@@ -2640,13 +2775,53 @@ bool FWPSceneViewExtension::TryPostProcessOwnershipPass_RenderThread(
 				|| RemainingOwnershipForceFailureCallbacks > 0);
 
 		const bool bLastEndpoint = EndpointIndex == PassEndpoints.Num() - 1;
-		const FScreenPassRenderTarget EndpointOverride = bLastEndpoint
-			? Inputs.OverrideOutput
-			: FScreenPassRenderTarget();
 		bool bShaderAvailable = false;
 		bool bBoundSceneDepthArray = false;
 		EWPCompositeFailureReason FailureReason =
 			EWPCompositeFailureReason::None;
+		EWPTemporaryFrontTranslucencyRestoreFailureReason TemporaryRestoreFailureReason =
+			EWPTemporaryFrontTranslucencyRestoreFailureReason::None;
+		bool bSubmitTemporaryRestore = false;
+		if (TemporaryFrontTranslucencyRestoreSettings.bEnabled)
+		{
+			++TemporaryFrontTranslucencyRestorePreflightAttemptCount;
+			// 로그 전용: TEMPORARY pass preflight CPU 비용만 측정한다.
+			const double TemporaryPreflightStartSeconds = FPlatformTime::Seconds();
+			bSubmitTemporaryRestore = ValidateWPTemporaryFrontTranslucencyRestorePass(
+				View,
+				CompositeInput,
+				BaseSceneColor,
+				SceneDepthTexture,
+				SceneDepthArraySlice,
+				TemporaryFrontTranslucencyCustomDepthTexture,
+				TemporaryFrontTranslucencyCustomStencilTexture,
+				TemporaryFrontTranslucencyRestoreSettings,
+				TemporaryRestoreFailureReason);
+			const double TemporaryPreflightCpuMs =
+				(FPlatformTime::Seconds() - TemporaryPreflightStartSeconds) * 1000.0;
+			TemporaryFrontTranslucencyRestoreAccumulatedPreflightCpuMs +=
+				TemporaryPreflightCpuMs;
+			TemporaryFrontTranslucencyRestoreMaxPreflightCpuMs = FMath::Max(
+				TemporaryFrontTranslucencyRestoreMaxPreflightCpuMs,
+				TemporaryPreflightCpuMs);
+			if (bSubmitTemporaryRestore)
+			{
+				++TemporaryFrontTranslucencyRestoreEligibleEndpointCount;
+			}
+			else if (TemporaryRestoreFailureReason
+				== EWPTemporaryFrontTranslucencyRestoreFailureReason::CustomDepthUnavailable)
+			{
+				++TemporaryFrontTranslucencyRestoreSkippedNoCustomDepthCount;
+			}
+			else
+			{
+				++TemporaryFrontTranslucencyRestoreSkippedOtherCount;
+			}
+		}
+		const FScreenPassRenderTarget EndpointOverride =
+			bLastEndpoint && !bSubmitTemporaryRestore
+				? Inputs.OverrideOutput
+				: FScreenPassRenderTarget();
 		++OwnershipRDGSetupAttemptCount;
 		// 로그 전용: endpoint RDG setup 비용만 측정하며 pass 제출 결과에는 관여하지 않는다.
 		const double SetupStartSeconds = FPlatformTime::Seconds();
@@ -2689,6 +2864,65 @@ bool FWPSceneViewExtension::TryPostProcessOwnershipPass_RenderThread(
 				SetupCpuMs,
 				VisibleEndpointCount);
 			return true;
+		}
+		if (bSubmitTemporaryRestore)
+		{
+			// 로그 전용: TEMPORARY restore RDG setup 비용을 production composite와 분리한다.
+			const double TemporarySetupStartSeconds = FPlatformTime::Seconds();
+			FScreenPassTexture TemporaryRestoreOutput =
+				AddWPTemporaryFrontTranslucencyRestorePass(
+					GraphBuilder,
+					View,
+					EndpointOutput,
+					BaseSceneColor,
+					bLastEndpoint
+						? Inputs.OverrideOutput
+						: FScreenPassRenderTarget(),
+					SceneDepthTexture,
+					SceneDepthArraySlice,
+					TemporaryFrontTranslucencyCustomDepthTexture,
+					TemporaryFrontTranslucencyCustomStencilTexture,
+					Parameters,
+					TemporaryFrontTranslucencyRestoreSettings,
+					HandleValue,
+					TemporaryRestoreFailureReason);
+			const double TemporarySetupCpuMs =
+				(FPlatformTime::Seconds() - TemporarySetupStartSeconds) * 1000.0;
+			TemporaryFrontTranslucencyRestoreAccumulatedSetupCpuMs +=
+				TemporarySetupCpuMs;
+			TemporaryFrontTranslucencyRestoreMaxSetupCpuMs = FMath::Max(
+				TemporaryFrontTranslucencyRestoreMaxSetupCpuMs,
+				TemporarySetupCpuMs);
+			TotalSetupCpuMs += TemporarySetupCpuMs;
+			OwnershipMaxSetupCpuMs = FMath::Max(
+				OwnershipMaxSetupCpuMs,
+				SetupCpuMs + TemporarySetupCpuMs);
+			if (!TemporaryRestoreOutput.IsValid())
+			{
+				++TemporaryFrontTranslucencyRestoreSubmissionFailureCount;
+				WP_LOG(nullptr, Error,
+					TEXT("[RenderThread][TemporaryFrontTranslucencyRestoreFailure] World=%s PairId=%s Handle=%llu EndpointIndex=%d EndpointCount=%d FailureReason=%s CustomStencil=%u FrontDepthBiasCm=%.3f TemporarySetupCpuMs=%.4f TotalSetupCpuMs=%.4f Implementation=WPTemporaryFrontTranslucencyRestorePass.cpp Shader=WPTemporaryFrontTranslucencyRestore.usf UntouchedSceneColor=1 PortalAbsentFailClosed=1"),
+					*RenderState->WorldName,
+					*Packet.PairId.ToString(),
+					HandleValue,
+					EndpointIndex,
+					PassEndpoints.Num(),
+					GetWPTemporaryFrontTranslucencyRestoreFailureReasonName(
+						TemporaryRestoreFailureReason),
+					TemporaryFrontTranslucencyRestoreSettings.CustomStencilValue,
+					TemporaryFrontTranslucencyRestoreSettings.FrontDepthBiasCm,
+					TemporarySetupCpuMs,
+					TotalSetupCpuMs);
+				FailOwnershipPass(
+					GetWPTemporaryFrontTranslucencyRestoreFailureReasonName(
+						TemporaryRestoreFailureReason),
+					TotalSetupCpuMs,
+					TemporarySetupCpuMs,
+					VisibleEndpointCount);
+				return true;
+			}
+			EndpointOutput = MoveTemp(TemporaryRestoreOutput);
+			++TemporaryFrontTranslucencyRestoreSubmittedPassCount;
 		}
 		CompositeInput = MoveTemp(EndpointOutput);
 		if (bWarmup)
@@ -2934,8 +3168,22 @@ void FWPSceneViewExtension::MaybeLogOwnershipSummary_RenderThread()
 		? OwnershipAccumulatedEligibilityCpuMs
 			/ static_cast<double>(OwnershipEligibilityEvaluationCount)
 		: 0.0;
+	const double TemporaryRestoreAveragePreflightCpuMs =
+		TemporaryFrontTranslucencyRestorePreflightAttemptCount > 0
+			? TemporaryFrontTranslucencyRestoreAccumulatedPreflightCpuMs
+				/ static_cast<double>(
+					TemporaryFrontTranslucencyRestorePreflightAttemptCount)
+			: 0.0;
+	const double TemporaryRestoreAverageSetupCpuMs =
+		TemporaryFrontTranslucencyRestoreEligibleEndpointCount > 0
+			? TemporaryFrontTranslucencyRestoreAccumulatedSetupCpuMs
+				/ static_cast<double>(
+					TemporaryFrontTranslucencyRestoreEligibleEndpointCount)
+			: 0.0;
+	const FWPTemporaryFrontTranslucencyRestoreSettings TemporaryRestoreSettings =
+		GetWPTemporaryFrontTranslucencyRestoreSettings_RenderThread();
 	WP_LOG(nullptr, Verbose,
-		TEXT("[RenderThread][ProductionSummary] World=%s WorldType=%s IntervalSeconds=%.3f ActiveWarmupOrProductionPairs=%d CallbackInvocations=%llu PairAttempts=%llu WarmupPairViews=%llu WarmupEndpointPasses=%llu WarmupAckPublished=%llu WarmupFailures=%llu WarmupLatchedSkips=%llu WarmupProgressPreservedAcrossPacketUpdates=%llu ProductionPairViews=%llu ProductionEndpointPasses=%llu ProductionFailures=%llu UnsupportedViews=%llu MissingReadyPacketViews=%llu InvisibleProductionPairViews=%llu PreflightPairFailures=%llu UnexpectedSubmissionFailures=%llu ForcedProductionFailureConfigured=%d ForcedProductionFailureRemaining=%d TotalCallbackCpuMs=%.4f AverageCallbackCpuMs=%.4f MaxCallbackCpuMs=%.4f EligibilityEvaluations=%llu TotalEligibilityCpuMs=%.4f AverageEligibilityCpuMs=%.4f MaxEligibilityCpuMs=%.4f PreflightAttempts=%llu PreflightFailures=%llu TotalPreflightCpuMs=%.4f AveragePreflightCpuMs=%.4f MaxPreflightCpuMs=%.4f RDGSetupAttempts=%llu TotalRDGSetupCpuMs=%.4f AverageRDGSetupCpuMs=%.4f MaxRDGSetupCpuMs=%.4f WarmupTrackerEntries=%d WarmupTrackersPruned=%d EligibilityEntries=%d EligibilityEntriesPruned=%d CachePruneCpuMs=%.4f GpuStat=WP.ProductionComposite WarmupUsesProductionOutput=1 WarmupConsecutiveFramesRequired=2 FailurePolicy=UntouchedSceneColorPortalAbsentFailClosed BaseSceneColorImmutable=1 EndpointOrder=GlobalFarToNearSurfaceStableSelectorPairIdHandleSide MultiPairPreflightFailure=ViewAtomicRollback UnexpectedSubmissionFailure=ViewAtomicRollback MasterEnabled=%d"),
+		TEXT("[RenderThread][ProductionSummary] World=%s WorldType=%s IntervalSeconds=%.3f ActiveWarmupOrProductionPairs=%d CallbackInvocations=%llu PairAttempts=%llu WarmupPairViews=%llu WarmupEndpointPasses=%llu WarmupAckPublished=%llu WarmupFailures=%llu WarmupLatchedSkips=%llu WarmupProgressPreservedAcrossPacketUpdates=%llu ProductionPairViews=%llu ProductionEndpointPasses=%llu ProductionFailures=%llu UnsupportedViews=%llu MissingReadyPacketViews=%llu InvisibleProductionPairViews=%llu PreflightPairFailures=%llu UnexpectedSubmissionFailures=%llu ForcedProductionFailureConfigured=%d ForcedProductionFailureRemaining=%d TotalCallbackCpuMs=%.4f AverageCallbackCpuMs=%.4f MaxCallbackCpuMs=%.4f EligibilityEvaluations=%llu TotalEligibilityCpuMs=%.4f AverageEligibilityCpuMs=%.4f MaxEligibilityCpuMs=%.4f PreflightAttempts=%llu PreflightFailures=%llu TotalPreflightCpuMs=%.4f AveragePreflightCpuMs=%.4f MaxPreflightCpuMs=%.4f RDGSetupAttempts=%llu TotalRDGSetupCpuMs=%.4f AverageRDGSetupCpuMs=%.4f MaxRDGSetupCpuMs=%.4f WarmupTrackerEntries=%d WarmupTrackersPruned=%d EligibilityEntries=%d EligibilityEntriesPruned=%d CachePruneCpuMs=%.4f TemporaryRestoreEnabled=%d TemporaryRestoreStencil=%u TemporaryRestoreFrontDepthBiasCm=%.3f TemporaryRestorePreflightAttempts=%llu TemporaryRestoreEligibleEndpoints=%llu TemporaryRestoreSkippedNoCustomDepth=%llu TemporaryRestoreSkippedOther=%llu TemporaryRestoreSubmittedPasses=%llu TemporaryRestoreSubmissionFailures=%llu TemporaryRestoreTotalPreflightCpuMs=%.4f TemporaryRestoreAveragePreflightCpuMs=%.4f TemporaryRestoreMaxPreflightCpuMs=%.4f TemporaryRestoreTotalSetupCpuMs=%.4f TemporaryRestoreAverageSetupCpuMs=%.4f TemporaryRestoreMaxSetupCpuMs=%.4f GpuStats=WP.ProductionComposite,WP.TemporaryFrontTranslucencyRestore TemporaryImplementation=WPTemporaryFrontTranslucencyRestorePass.cpp TemporaryShader=WPTemporaryFrontTranslucencyRestore.usf TemporaryLimitation=RestoresPrecompositedBaseSceneColorNotPerPixelTransmittance WarmupUsesProductionOutput=1 WarmupConsecutiveFramesRequired=2 FailurePolicy=UntouchedSceneColorPortalAbsentFailClosed BaseSceneColorImmutable=1 EndpointOrder=GlobalFarToNearSurfaceStableSelectorPairIdHandleSide MultiPairPreflightFailure=ViewAtomicRollback UnexpectedSubmissionFailure=ViewAtomicRollback MasterEnabled=%d"),
 		*RenderState->WorldName, *RenderState->WorldType,
 		NowSeconds - OwnershipSummaryStartSeconds,
 		RenderState->ActiveOwnershipPairCount.Load(),
@@ -2963,6 +3211,21 @@ void FWPSceneViewExtension::MaybeLogOwnershipSummary_RenderThread()
 		AverageSetupCpuMs, OwnershipMaxSetupCpuMs,
 		OwnershipWarmupByHandleRenderThread.Num(), WarmupTrackerPruned,
 		LastEligibilityByHandle.Num(), EligibilityEntriesPruned, TrackerPruneCpuMs,
+		TemporaryRestoreSettings.bEnabled ? 1 : 0,
+		TemporaryRestoreSettings.CustomStencilValue,
+		TemporaryRestoreSettings.FrontDepthBiasCm,
+		TemporaryFrontTranslucencyRestorePreflightAttemptCount,
+		TemporaryFrontTranslucencyRestoreEligibleEndpointCount,
+		TemporaryFrontTranslucencyRestoreSkippedNoCustomDepthCount,
+		TemporaryFrontTranslucencyRestoreSkippedOtherCount,
+		TemporaryFrontTranslucencyRestoreSubmittedPassCount,
+		TemporaryFrontTranslucencyRestoreSubmissionFailureCount,
+		TemporaryFrontTranslucencyRestoreAccumulatedPreflightCpuMs,
+		TemporaryRestoreAveragePreflightCpuMs,
+		TemporaryFrontTranslucencyRestoreMaxPreflightCpuMs,
+		TemporaryFrontTranslucencyRestoreAccumulatedSetupCpuMs,
+		TemporaryRestoreAverageSetupCpuMs,
+		TemporaryFrontTranslucencyRestoreMaxSetupCpuMs,
 		CVarWPSceneViewExtensionEnabled.GetValueOnRenderThread() != 0 ? 1 : 0);
 #endif
 
@@ -2996,5 +3259,15 @@ void FWPSceneViewExtension::MaybeLogOwnershipSummary_RenderThread()
 	OwnershipPreflightFailureCount = 0;
 	OwnershipPreflightPairFailureCount = 0;
 	OwnershipUnexpectedSubmissionFailureCount = 0;
+	TemporaryFrontTranslucencyRestoreAccumulatedPreflightCpuMs = 0.0;
+	TemporaryFrontTranslucencyRestoreMaxPreflightCpuMs = 0.0;
+	TemporaryFrontTranslucencyRestoreAccumulatedSetupCpuMs = 0.0;
+	TemporaryFrontTranslucencyRestoreMaxSetupCpuMs = 0.0;
+	TemporaryFrontTranslucencyRestorePreflightAttemptCount = 0;
+	TemporaryFrontTranslucencyRestoreEligibleEndpointCount = 0;
+	TemporaryFrontTranslucencyRestoreSkippedNoCustomDepthCount = 0;
+	TemporaryFrontTranslucencyRestoreSkippedOtherCount = 0;
+	TemporaryFrontTranslucencyRestoreSubmittedPassCount = 0;
+	TemporaryFrontTranslucencyRestoreSubmissionFailureCount = 0;
 }
 

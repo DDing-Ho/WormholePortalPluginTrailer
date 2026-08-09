@@ -243,7 +243,8 @@ private:
 		FWPPortalPairState& PairState,
 		float SchedulerElapsedSeconds,
 		EWPManagedCaptureSubmissionMode SubmissionMode,
-		double& OutCaptureCpuMs);
+		double& OutCaptureCpuMs,
+		uint8 SelectedFaceMask = 0x3f);
 
 	/** Owner bridge that returns the RuntimeSubsystem's World. */
 	UWorld* GetWorld() const;

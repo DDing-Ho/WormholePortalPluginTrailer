@@ -73,7 +73,7 @@ void FWPRuntimeRenderPublication::EnsureRendererRegistration(FWPPortalPairState&
 			PairState.Capture.Visibility.LastOwnershipEpoch = 0;
 			PairState.Capture.Visibility.LastSampleSequence = 0;
 			PairState.Capture.Visibility.LastSampleReceiptSeconds = -1.0e30;
-			PairState.Capture.Visibility.LastVisibleEndpointCount = 2;
+			PairState.Capture.Visibility.LastVisibleEndpointMask = 0x3;
 			PairState.Capture.Visibility.RejectedOwnershipEpoch = 0;
 			PairState.Capture.Visibility.RejectedThroughSampleSequence = 0;
 			PairState.Capture.Visibility.InvisibleElapsedSeconds = 0.0;
@@ -168,11 +168,11 @@ void FWPRuntimeRenderPublication::UpdatePairOwnership(
 				Feedback.VisibilityOwnershipEpoch;
 			PairState.Capture.Visibility.LastSampleSequence =
 				Feedback.VisibilitySampleSequence;
-			PairState.Capture.Visibility.LastVisibleEndpointCount =
-				FMath::Min(Feedback.VisibleEndpointCount, 2u);
+			PairState.Capture.Visibility.LastVisibleEndpointMask =
+				static_cast<uint8>(Feedback.VisibleEndpointMask & 0x3u);
 			PairState.Capture.Visibility.LastSampleReceiptSeconds =
 				FPlatformTime::Seconds();
-			switch (PairState.Capture.Visibility.LastVisibleEndpointCount)
+			switch (PairState.Capture.Visibility.GetLastVisibleEndpointCount())
 			{
 			case 0:
 				break;
